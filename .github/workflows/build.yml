@@ -11,7 +11,7 @@ on:
 
 jobs:
   check_upstream:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
       latest_hash: ${{ steps.check.outputs.latest_hash }}
@@ -69,7 +69,7 @@ jobs:
     - name: Update Last Built Hash
       if: success() && needs.check_upstream.outputs.latest_hash != ''
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.WRITE_TO_ENV }}
       run: |
         echo "Updating LAST_BUILT_HASH to ${{ needs.check_upstream.outputs.latest_hash }}"
         
