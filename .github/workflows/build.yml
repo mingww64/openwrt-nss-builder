@@ -12,7 +12,6 @@ on:
 jobs:
   check_upstream:
     runs-on: ubuntu-latest
-    environment: repo_hash
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
       latest_hash: ${{ steps.check.outputs.latest_hash }}
@@ -46,15 +45,11 @@ jobs:
             echo "Upstream matches last build ($LAST_BUILT_HASH). Skipping."
             echo "should_build=false" >> $GITHUB_OUTPUT
           fi
-          echo ${{ vars.LAST_BUILT_HASH }}
-          echo "LAST_BUILT_HASH=BCD" >> $GITHUB_ENV
-          echo ${{ vars.LAST_BUILT_HASH }}
 
 
   build:
     needs: check_upstream
     if: ${{ needs.check_upstream.outputs.should_build == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' }}
-    environment: repo_hash
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -72,15 +67,16 @@ jobs:
       run: nix develop --command build-nss-image
 
     - name: Update Last Built Hash
-      if: success()
+      if: success() && needs.check_upstream.outputs.latest_hash != ''
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        LATEST_HASH: ${{ needs.check_upstream.outputs.latest_hash }}
       run: |
-        # Only attempt update if we have a valid hash from upstream check
-        if [ -n "$LATEST_HASH" ]; then
-          gh variable set LAST_BUILT_HASH --body "$LATEST_HASH" || echo "Warning: Failed to update LAST_BUILT_HASH variable. Ensure a repository variable named LAST_BUILT_HASH exists."
-        fi
+        echo "Updating LAST_BUILT_HASH to ${{ needs.check_upstream.outputs.latest_hash }}"
+        
+        # Using the GitHub CLI to set the variable
+        gh variable set LAST_BUILT_HASH \
+          --body "${{ needs.check_upstream.outputs.latest_hash }}" \
+          --repo ${{ github.repository }}
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
