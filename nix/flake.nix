@@ -39,7 +39,7 @@
 
       buildScript = pkgs.writeShellScriptBin "build-nss-image" ''
         set -e
-        PACKAGES=$(cat ./packages.txt || echo "")
+        EXTRA_PACKAGES=$(cat ./packages.txt || echo "")
         if [ "$1" == "--sync-packages" ]; then
           LOGFILE="../build-$(date +%Y%m%d-%H%M%S)-sync.log"
           echo "--- Syncing package list from router using ssh ---" | tee -a "$LOGFILE"
@@ -47,7 +47,7 @@
           # Merge static package list and ssh apk info, remove duplicates
           SSH_PACKAGES=$(ssh ${routerUser}@${routerIp} "apk info" | grep -vE '(kmod|kernel|base-files|libc|libgcc|qca-nss|nss-dp|ath11k)')
 
-          PACKAGES=$(echo "$EXTRA_PACKAGES $SSH_PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+          EXTRA_PACKAGES=$(echo "$EXTRA_PACKAGES $SSH_PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ')
         else
           LOGFILE="../build-$(date +%Y%m%d-%H%M%S).log"
         fi
@@ -141,6 +141,19 @@
               echo "Copying package patches..."
               cp -r patches/package source/
             fi
+            
+            # Temporary fix for command_all.sh I/O error in GitHub Actions
+            # The script iterates over all PATH entries, which in Nix environment is huge and may contain problematic paths
+            # We replace it with a simpler version that returns the command path without iterating manually
+            # This avoids the "command: command: I/O error" when hitting problematic directories in PATH
+            echo "Patching scripts/command_all.sh to avoid I/O errors..."
+            cat > source/scripts/command_all.sh <<'EOF'
+#!/bin/sh
+# Replaced by flake.nix shellHook to avoid I/O errors in long Nix paths
+# Just return the first found command, as we provided the correct env via Nix
+command -v "$@"
+EOF
+            chmod +x source/scripts/command_all.sh
           fi
 
           # Prepare writable copies of feeds (separate from ./feeds symlink dir)
