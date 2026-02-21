@@ -1,0 +1,3 @@
+source/
+.direnv/
+*.log
