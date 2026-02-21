@@ -46,6 +46,9 @@ jobs:
             echo "Upstream matches last build ($LAST_BUILT_HASH). Skipping."
             echo "should_build=false" >> $GITHUB_OUTPUT
           fi
+          gh variable set LAST_BUILT_HASH --body "ABC"
+          echo ${{ vars.LAST_BUILT_HASH }}
+          echo "LAST_BUILT_HASH=BCD" >> $GITHUB_ENV
 
   build:
     needs: check_upstream
