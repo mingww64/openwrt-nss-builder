@@ -47,31 +47,15 @@
           # Merge static package list and ssh apk info, remove duplicates
           SSH_PACKAGES=$(ssh ${routerUser}@${routerIp} "apk info" | grep -vE '(kmod|kernel|base-files|libc|libgcc|qca-nss|nss-dp|ath11k)')
 
-          PACKAGES=$(echo "$PACKAGES $SSH_PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+          PACKAGES=$(echo "$EXTRA_PACKAGES $SSH_PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ')
         else
           LOGFILE="../build-$(date +%Y%m%d-%H%M%S).log"
         fi
-        echo -e "--- Including packages: --- \n $PACKAGES \n--- End of package list ---" | tee -a "$LOGFILE"
+        echo -e "--- Including packages: --- \n $EXTRA_PACKAGES \n--- End of package list ---" | tee -a "$LOGFILE"
 
         LOGFILE="../build-$(date +%Y%m%d-%H%M%S).log"
         # Generate config fragment to enable all packages
         cd source
-        if [ -n "$PACKAGES" ]; then
-          for pkg in $PACKAGES; do
-            # Only use valid OpenWrt package names
-            if [[ $pkg =~ ^[a-zA-Z0-9._+-]+$ ]]; then
-              echo "CONFIG_PACKAGE_$pkg=y" >> .config.fragment
-            fi
-          done
-          # Append config fragment to .config before defconfig
-          if [ ! -f .config ]; then
-            cp nss-setup/config-nss.seed .config
-          fi
-          cat .config.fragment >> .config
-          rm -f .config.fragment
-          make defconfig V=s 2>&1 | tee -a "$LOGFILE"
-        fi
-
 
         if [ "$1" == "--make-only" ]; then
            echo "--- Starting image build (Make only) ---" | tee -a "$LOGFILE"
@@ -83,13 +67,24 @@
            exit 0
         fi
 
-
         # Install feeds from pinned flake inputs
         echo "--- Installing feeds ---" | tee -a "$LOGFILE"
         ./scripts/feeds update && ./scripts/feeds install -a 2>&1 | tee -a "$LOGFILE"
 
         # Build the image using the config seed
-        [ ! -f .config ] && cp nss-setup/config-nss.seed .config && make defconfig V=s 2>&1 | tee -a "$LOGFILE"
+        [ ! -f .config ] && cp nss-setup/config-nss.seed .config
+        
+        if [ -n "$EXTRA_PACKAGES" ]; then
+          for pkg in $EXTRA_PACKAGES; do
+            # Only use valid OpenWrt package names
+            if [[ $pkg =~ ^[a-zA-Z0-9._+-]+$ ]]; then
+              echo "CONFIG_PACKAGE_$pkg=y" >> .config.fragment
+            fi
+          done
+          cat .config.fragment >> .config
+          rm -f .config.fragment
+        fi
+        make defconfig V=s 2>&1 | tee -a "$LOGFILE"
 
         echo "--- Downloading sources ---" | tee -a "$LOGFILE"
         make download -j$(nproc) V=s 2>&1 | tee -a "$LOGFILE"
