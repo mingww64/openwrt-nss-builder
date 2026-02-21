@@ -32,26 +32,6 @@
         "type": "github"
       }
     },
-    "nss-env": {
-      "inputs": {
-        "luci-theme-argon": "luci-theme-argon",
-        "nixpkgs": "nixpkgs",
-        "nss-packages": "nss-packages",
-        "openwrt-luci": "openwrt-luci",
-        "openwrt-packages": "openwrt-packages",
-        "openwrt-routing": "openwrt-routing",
-        "sqm-scripts-nss": "sqm-scripts-nss"
-      },
-      "locked": {
-        "path": "./nix",
-        "type": "path"
-      },
-      "original": {
-        "path": "./nix",
-        "type": "path"
-      },
-      "parent": []
-    },
     "nss-packages": {
       "flake": false,
       "locked": {
@@ -72,11 +52,11 @@
     "openwrt-luci": {
       "flake": false,
       "locked": {
-        "lastModified": 1771556180,
-        "narHash": "sha256-E++RshjWbpH4E82L+IlJ3xgMqY8A9iqiT1195TLsiQg=",
+        "lastModified": 1771622019,
+        "narHash": "sha256-f3KRvzmbLP/eSq/cX+PERc3lqIJDsHL11vQ0iA3b7/s=",
         "owner": "openwrt",
         "repo": "luci",
-        "rev": "89ab7fd2d65c896736b152eca0ec5d588dc4aaff",
+        "rev": "2a8230dfdd8d02136be71b7b8d30d1c3dc39b482",
         "type": "github"
       },
       "original": {
@@ -88,11 +68,11 @@
     "openwrt-packages": {
       "flake": false,
       "locked": {
-        "lastModified": 1771587252,
-        "narHash": "sha256-ONqyBvFwRexm7etWV7F0pGcoZdPR5eRcrF+2YPFKzHM=",
+        "lastModified": 1771615369,
+        "narHash": "sha256-v+hrafStTEXzoIhLh7jY+FixDiOjMYyQomg7DR6BzhI=",
         "owner": "openwrt",
         "repo": "packages",
-        "rev": "23324d9ca107e9ccb2091170c9791707453bf990",
+        "rev": "cadf02496cf5e68299ac6effddb8400a5e5c8c37",
         "type": "github"
       },
       "original": {
@@ -119,7 +99,13 @@
     },
     "root": {
       "inputs": {
-        "nss-env": "nss-env"
+        "luci-theme-argon": "luci-theme-argon",
+        "nixpkgs": "nixpkgs",
+        "nss-packages": "nss-packages",
+        "openwrt-luci": "openwrt-luci",
+        "openwrt-packages": "openwrt-packages",
+        "openwrt-routing": "openwrt-routing",
+        "sqm-scripts-nss": "sqm-scripts-nss"
       }
     },
     "sqm-scripts-nss": {
