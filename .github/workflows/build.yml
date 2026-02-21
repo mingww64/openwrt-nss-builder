@@ -1,17 +1,60 @@
 name: OpenWrt NSS Build
 
 on:
+  repository_dispatch:
+    types: [upstream_update]
   push:
     branches: [ "master", "main" ]
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *'  # Run daily at midnight UTC
+    - cron: '0 */6 * * *'  # Check for updates every 6 hours
 
 jobs:
+  check_upstream:
+    runs-on: ubuntu-latest
+    environment: repo_hash
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      latest_hash: ${{ steps.check.outputs.latest_hash }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check Upstream
+        id: check
+        run: |
+          UPSTREAM_URL="https://github.com/qosmio/openwrt-ipq.git"
+          BRANCH="main-nss"
+          
+          # Get latest commit hash from upstream
+          LATEST_HASH=$(git ls-remote $UPSTREAM_URL refs/heads/$BRANCH | awk '{print $1}')
+          
+          echo "Latest upstream hash: $LATEST_HASH"
+          
+          # Read stored hash from variable (if exists) or file
+          # We use a repository variable for persistence. 
+          # Note: This requires the workflow to have read access to variables.
+          # If variable is empty, we default to building.
+          LAST_BUILT_HASH="${{ vars.LAST_BUILT_HASH }}"
+          
+          echo "Last built hash: $LAST_BUILT_HASH"
+          
+          if [ "$LATEST_HASH" != "$LAST_BUILT_HASH" ]; then
+            echo "New commit found ($LATEST_HASH). Triggering build."
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "latest_hash=$LATEST_HASH" >> $GITHUB_OUTPUT
+          else
+            echo "Upstream matches last build ($LAST_BUILT_HASH). Skipping."
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
   build:
+    needs: check_upstream
+    if: ${{ needs.check_upstream.outputs.should_build == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' }}
+    environment: repo_hash
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: write  # Required for updating variables via API
 
     steps:
     - uses: actions/checkout@v4
@@ -24,8 +67,20 @@ jobs:
     - name: Build OpenWrt Image
       run: nix develop --command build-nss-image
 
+    - name: Update Last Built Hash
+      if: success()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        LATEST_HASH: ${{ needs.check_upstream.outputs.latest_hash }}
+      run: |
+        # Only attempt update if we have a valid hash from upstream check
+        if [ -n "$LATEST_HASH" ]; then
+          gh variable set LAST_BUILT_HASH --body "$LATEST_HASH" || echo "Warning: Failed to update LAST_BUILT_HASH variable. Ensure a repository variable named LAST_BUILT_HASH exists."
+        fi
+
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: openwrt-images
         path: source/bin/targets/qualcommax/ipq60xx/
+        if-no-files-found: warn
