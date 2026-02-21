@@ -119,6 +119,35 @@
             echo "Cloning OpenWrt source..."
             git clone -b main-nss https://github.com/qosmio/openwrt-ipq.git source
           fi
+
+          # Apply custom patches
+          if [ -d "patches" ]; then
+            echo "Applying patches..."
+            # For patches that modify the build system (Makefiles, Config.in, etc), apply them at root
+            for patch in patches/*.patch; do
+              if [ -f "$patch" ]; then
+                if patch -d source -R -p1 -s -f --dry-run < "$patch" >/dev/null 2>&1; then
+                  echo "✅ Patch $(basename $patch) already applied."
+                else
+                  echo "🔧 Applying patch $(basename $patch)..."
+                  if patch -d source -p1 < "$patch"; then
+                    echo "✅ Applied $(basename $patch)"
+                  else
+                    echo "❌ Failed to apply $(basename $patch)"
+                    exit 1
+                  fi
+                fi
+              fi
+            done
+            
+            # For package source patches (e.g. util-linux), copy them to destination
+            # This handles structure like patches/package/utils/util-linux/patches/100-...
+            if [ -d "patches/package" ]; then
+              echo "Copying package patches..."
+              cp -r patches/package source/
+            fi
+          fi
+
           # Prepare writable copies of feeds (separate from ./feeds symlink dir)
           mkdir -p source/feeds-src
           if [ ! -d "source/feeds-src/packages" ]; then

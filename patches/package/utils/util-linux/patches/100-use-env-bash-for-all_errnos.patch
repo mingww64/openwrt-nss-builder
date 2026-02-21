@@ -1,0 +1,7 @@
+--- a/tools/all_errnos
++++ b/tools/all_errnos
+@@ -1,4 +1,4 @@
+-#!/bin/bash
++#!/usr/bin/env bash
+ 
+ # Derived from all_syscalls.
