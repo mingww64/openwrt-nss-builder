@@ -109,6 +109,7 @@
       commonShellHook = ''
           export NIX_LD="$(cat ${pkgs.stdenv.cc}/nix-support/dynamic-linker)"
           export NIX_LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib"
+          export TZ=UTC
 
           if [ ! -d "source" ]; then
             echo "Cloning OpenWrt source..."
