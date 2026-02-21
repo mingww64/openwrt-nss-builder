@@ -48,6 +48,8 @@ jobs:
           fi
           echo ${{ vars.LAST_BUILT_HASH }}
           echo "LAST_BUILT_HASH=BCD" >> $GITHUB_ENV
+          echo ${{ vars.LAST_BUILT_HASH }}
+
 
   build:
     needs: check_upstream
