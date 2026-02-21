@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "luci-theme-argon": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1770113428,
+        "narHash": "sha256-OyIfPB2c0YjrL4Zj7L8hqDbMKLtjNkW6UGqkySUrkEc=",
+        "owner": "jerrykuku",
+        "repo": "luci-theme-argon",
+        "rev": "7aba78ccb84297496f63e1dacefe64c89d83d72e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "jerrykuku",
+        "repo": "luci-theme-argon",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1771369470,
@@ -15,6 +31,26 @@
         "repo": "nixpkgs",
         "type": "github"
       }
+    },
+    "nss-env": {
+      "inputs": {
+        "luci-theme-argon": "luci-theme-argon",
+        "nixpkgs": "nixpkgs",
+        "nss-packages": "nss-packages",
+        "openwrt-luci": "openwrt-luci",
+        "openwrt-packages": "openwrt-packages",
+        "openwrt-routing": "openwrt-routing",
+        "sqm-scripts-nss": "sqm-scripts-nss"
+      },
+      "locked": {
+        "path": "./nix",
+        "type": "path"
+      },
+      "original": {
+        "path": "./nix",
+        "type": "path"
+      },
+      "parent": []
     },
     "nss-packages": {
       "flake": false,
@@ -52,11 +88,11 @@
     "openwrt-packages": {
       "flake": false,
       "locked": {
-        "lastModified": 1771542653,
-        "narHash": "sha256-pQY+ZFHCYAAmFdG7+lQ2rH/hYSXd6sD+hfHHYSfo4BM=",
+        "lastModified": 1771587252,
+        "narHash": "sha256-ONqyBvFwRexm7etWV7F0pGcoZdPR5eRcrF+2YPFKzHM=",
         "owner": "openwrt",
         "repo": "packages",
-        "rev": "fe4c369692c67d5828460904172144da24de7207",
+        "rev": "23324d9ca107e9ccb2091170c9791707453bf990",
         "type": "github"
       },
       "original": {
@@ -83,12 +119,7 @@
     },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs",
-        "nss-packages": "nss-packages",
-        "openwrt-luci": "openwrt-luci",
-        "openwrt-packages": "openwrt-packages",
-        "openwrt-routing": "openwrt-routing",
-        "sqm-scripts-nss": "sqm-scripts-nss"
+        "nss-env": "nss-env"
       }
     },
     "sqm-scripts-nss": {

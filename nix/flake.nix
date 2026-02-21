@@ -103,7 +103,7 @@
         stdenv.cc binutils patch perl python3 wget git unzip
         libxslt ncurses zlib openssl bc rsync file gnumake gawk
         which diffutils gettext openssh direnv buildScript
-        ncurses pkg-config quilt nix-ld
+        ncurses pkg-config quilt nix-ld ccache
       ];
 
       commonShellHook = ''
