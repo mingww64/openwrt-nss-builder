@@ -76,8 +76,10 @@
         echo "--- Installing feeds ---" | tee -a "$LOGFILE"
         ./scripts/feeds update && ./scripts/feeds install -a 2>&1 | tee -a "$LOGFILE"
 
+        # Make all feeds writable since they are copied from read-only Nix store
+        chmod -R u+w feeds/
+
         # Disable Python PGO to prevent test failures during host build
-        chmod u+w feeds/packages/lang/python/python3/Makefile
         sed -i 's/--enable-optimizations//g' feeds/packages/lang/python/python3/Makefile
 
         # Build the image using the config seed
