@@ -96,6 +96,11 @@
           cat .config.fragment >> .config
           rm -f .config.fragment
         fi
+        
+        # Use Nixpkgs Go for bootstrap
+        echo "CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT=\"$(dirname $(dirname $(which go)))/share/go\"" >> .config
+        echo "CONFIG_GOLANG_BUILD_BOOTSTRAP=n" >> .config
+        
         make defconfig V=s 2>&1 | tee -a "$LOGFILE"
 
         echo "--- Downloading sources ---" | tee -a "$LOGFILE"
@@ -115,13 +120,29 @@
         stdenv.cc binutils patch perl python3 wget git unzip
         libxslt ncurses zlib openssl bc rsync file gnumake gawk
         which diffutils gettext openssh direnv buildScript
-        ncurses pkg-config quilt nix-ld ccache
+        ncurses pkg-config quilt nix-ld ccache go
       ];
 
       commonShellHook = ''
           export NIX_LD="$(cat ${pkgs.stdenv.cc}/nix-support/dynamic-linker)"
           export NIX_LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib"
           export TZ=UTC
+
+          # --- DYNAMIC FIX FOR NATIVE WRAPPER BYPASS ---
+          # OpenWrt's build system aggressively searches for <arch>-<os>-<libc>-<tool>.
+          # We dynamically grab the exact triplet Nix is using for the current builder
+          # and map those prefixed names back to our wrapped Nix tools.
+          TRIPLET="${pkgs.stdenv.hostPlatform.config}"
+          mkdir -p .nix-host-wrappers
+          
+          for tool in gcc g++ cpp as ar ld nm ranlib strip objdump; do
+            if WRAPPED_TOOL=$(command -v "$tool"); then
+              ln -sf "$WRAPPED_TOOL" ".nix-host-wrappers/$TRIPLET-$tool"
+            fi
+          done
+          
+          export PATH="$PWD/.nix-host-wrappers:$PATH"
+          # ---------------------------------------------
 
           if [ ! -d "source/.git" ]; then
             echo "Cloning OpenWrt source..."
@@ -213,4 +234,3 @@ EOF
     });
   };
 }
-
