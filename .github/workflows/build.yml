@@ -58,6 +58,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Update tzdata
+      run: sudo apt-get update && sudo apt-get install -y tzdata
+
     - name: Install Nix
       uses: cachix/install-nix-action@v25
       with:
