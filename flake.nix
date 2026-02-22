@@ -123,7 +123,7 @@
           export NIX_LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib"
           export TZ=UTC
 
-          if [ ! -d "source" ]; then
+          if [ ! -d "source/.git" ]; then
             echo "Cloning OpenWrt source..."
             git clone -b main-nss https://github.com/qosmio/openwrt-ipq.git source
           fi
