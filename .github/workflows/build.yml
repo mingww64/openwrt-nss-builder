@@ -118,7 +118,7 @@ jobs:
         if-no-files-found: warn
 
     - name: Upload to Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v2.4.2
       if: success()
       with:
         files: |
