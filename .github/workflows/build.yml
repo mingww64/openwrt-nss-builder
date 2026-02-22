@@ -72,7 +72,7 @@ jobs:
     - name: Cache OpenWrt dl directory
       uses: actions/cache@v4
       with:
-        path: source/dl
+        path: cache/dl
         key: ${{ runner.os }}-openwrt-dl-${{ needs.check_upstream.outputs.latest_hash }}-${{ hashFiles('flake.nix', 'packages.txt') }}
         restore-keys: |
           ${{ runner.os }}-openwrt-dl-
@@ -80,7 +80,7 @@ jobs:
     - name: Cache OpenWrt ccache
       uses: actions/cache@v4
       with:
-        path: source/.ccache
+        path: cache/ccache
         key: ${{ runner.os }}-openwrt-ccache-${{ github.sha }}
         restore-keys: |
           ${{ runner.os }}-openwrt-ccache-
