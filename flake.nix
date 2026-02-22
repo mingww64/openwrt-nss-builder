@@ -76,7 +76,12 @@
           esac
         done
 
-        EXTRA_PACKAGES=$(cat ./packages.txt || echo "")
+        EXTRA_PACKAGES=""
+        if [ -f ./packages.txt ]; then
+          EXTRA_PACKAGES=$(cat ./packages.txt)
+        elif [ -f "$FLAKE_SOURCE/packages.txt" ]; then
+          EXTRA_PACKAGES=$(cat "$FLAKE_SOURCE/packages.txt")
+        fi
         if [ "$SYNC_PACKAGES" -eq 1 ]; then
           LOGFILE="../build-$(date +%Y%m%d-%H%M%S)-sync.log"
           echo "--- Syncing package list from router using ssh ---" | tee -a "$LOGFILE"
@@ -96,7 +101,7 @@
 
         if [ "$MAKE_ONLY" -eq 1 ]; then
            echo "--- Starting image build (Make only) ---" | tee -a "$LOGFILE"
-           make -j$(nproc) V=s PROFILE="$PROFILE" 2>&1 | tee -a "$LOGFILE" || {
+           make -j$(nproc) V=s 2>&1 | tee -a "$LOGFILE" || {
              echo "Build failed. Check $LOGFILE for details" | tee -a "$LOGFILE"
              exit 1
            }
@@ -113,11 +118,17 @@
         # Install feeds from pinned flake inputs if they changed
         if [ -f .feeds_need_update ] || [ ! -d feeds ]; then
           echo "--- Installing feeds ---" | tee -a "$LOGFILE"
+          
+          # Make existing feeds writable so they can be removed by update
+          if [ -d feeds ]; then
+            chmod -R u+w feeds/ || true
+          fi
+          
           ./scripts/feeds update && ./scripts/feeds install -a 2>&1 | tee -a "$LOGFILE"
-
+          
           # Make all feeds writable since they are copied from read-only Nix store
-          chmod -R u+w feeds/
-
+          chmod -R u+w feeds/          
+          
           # Disable Python PGO to prevent test failures during host build
           sed -i 's/--enable-optimizations//g' feeds/packages/lang/python/python3/Makefile
           
@@ -127,7 +138,13 @@
         fi
 
         # Build the image using the config seed
-        [ ! -f .config ] && [ -f nss-setup/config-nss.seed ] && cp nss-setup/config-nss.seed .config
+        if [ ! -f .config ]; then
+          if [ -f nss-setup/config-nss.seed ]; then
+            cp nss-setup/config-nss.seed .config
+          elif [ -f "$FLAKE_SOURCE/nss-setup/config-nss.seed" ]; then
+            cp "$FLAKE_SOURCE/nss-setup/config-nss.seed" .config
+          fi
+        fi
         
         # Disable all sub-targets and devices by default in .config
         sed -i 's/^CONFIG_TARGET_qualcommax_\([a-z0-9]*\)=y/# CONFIG_TARGET_qualcommax_\1 is not set/' .config
@@ -143,13 +160,29 @@
         
         MATCH_COUNT=$(echo "$MATCHED_PROFILES" | wc -l)
         if [ "$MATCH_COUNT" -gt 1 ]; then
-          echo "❌ Error: Multiple profiles matched '$PROFILE':" | tee -a "$LOGFILE"
-          echo "$MATCHED_PROFILES" | tee -a "$LOGFILE"
-          echo "Please be more specific." | tee -a "$LOGFILE"
-          exit 1
+          echo "⚠️ Multiple profiles matched '$PROFILE':" | tee -a "$LOGFILE"
+          
+          # Convert string to array
+          mapfile -t PROFILE_ARRAY <<< "$MATCHED_PROFILES"
+          
+          # Print options
+          for i in "''${!PROFILE_ARRAY[@]}"; do
+            echo "  [$((i+1))] ''${PROFILE_ARRAY[$i]}" | tee -a "$LOGFILE"
+          done
+          
+          # Prompt user for choice
+          while true; do
+            read -p "Select a profile (1-$MATCH_COUNT): " choice
+            if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$MATCH_COUNT" ]; then
+              MATCHED_PROFILE="''${PROFILE_ARRAY[$((choice-1))]}"
+              break
+            else
+              echo "Invalid selection. Please enter a number between 1 and $MATCH_COUNT."
+            fi
+          done
+        else
+          MATCHED_PROFILE="$MATCHED_PROFILES"
         fi
-        
-        MATCHED_PROFILE="$MATCHED_PROFILES"
         
         SUBTARGET=$(echo "$MATCHED_PROFILE" | sed -E 's/CONFIG_TARGET_qualcommax_([a-z0-9]+)_DEVICE_.*/\1/')
         
@@ -181,7 +214,7 @@
         make download -j$(nproc) V=s 2>&1 | tee -a "$LOGFILE"
 
         echo "--- Starting image build ---" | tee -a "$LOGFILE"
-        make -j$(nproc) V=s PROFILE="$PROFILE" 2>&1 | tee -a "$LOGFILE" || {
+        make -j$(nproc) V=s 2>&1 | tee -a "$LOGFILE" || {
           echo "Build failed. Check $LOGFILE for details" | tee -a "$LOGFILE"
           exit 1
         }
@@ -201,6 +234,7 @@
           export NIX_LD="$(cat ${pkgs.stdenv.cc}/nix-support/dynamic-linker)"
           export NIX_LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib"
           export TZ=UTC
+          export FLAKE_SOURCE="${self}"
 
           # --- DYNAMIC FIX FOR NATIVE WRAPPER BYPASS ---
           # OpenWrt's build system aggressively searches for <arch>-<os>-<libc>-<tool>.
@@ -237,9 +271,18 @@
 
           # Apply custom patches
           if [ -d "patches" ]; then
-            echo "Applying patches..."
+            echo "Applying patches from local directory..."
+            PATCH_DIR="patches"
+          elif [ -d "$FLAKE_SOURCE/patches" ]; then
+            echo "Applying patches from flake source..."
+            PATCH_DIR="$FLAKE_SOURCE/patches"
+          else
+            PATCH_DIR=""
+          fi
+
+          if [ -n "$PATCH_DIR" ]; then
             # For patches that modify the build system (Makefiles, Config.in, etc), apply them at root
-            for patch in patches/*.patch; do
+            for patch in "$PATCH_DIR"/*.patch; do
               if [ -f "$patch" ]; then
                 if patch -d source -R -p1 -s -f --dry-run < "$patch" >/dev/null 2>&1; then
                   echo "✅ Patch $(basename $patch) already applied."
@@ -257,9 +300,11 @@
             
             # For package source patches (e.g. util-linux), copy them to destination
             # This handles structure like patches/package/utils/util-linux/patches/100-...
-            if [ -d "patches/package" ]; then
+            if [ -d "$PATCH_DIR/package" ]; then
               echo "Copying package patches..."
-              cp -r patches/package source/
+              # Use rsync to merge directories and ensure copied files are writable
+              rsync -a --no-perms "$PATCH_DIR/package/" source/package/
+              chmod -R u+w source/package/
             fi
           fi
             
