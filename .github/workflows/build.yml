@@ -91,7 +91,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
-        path: source/**/*.log
+        path: ./**/*.log
         if-no-files-found: warn
 
     - name: Setup SSH Session
