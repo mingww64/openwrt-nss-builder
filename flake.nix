@@ -44,6 +44,7 @@
 
       buildScript = pkgs.writeShellScriptBin "build-nss-image" ''
         set -e
+        set -o pipefail
         EXTRA_PACKAGES=$(cat ./packages.txt || echo "")
         if [ "$1" == "--sync-packages" ]; then
           LOGFILE="../build-$(date +%Y%m%d-%H%M%S)-sync.log"

@@ -88,6 +88,10 @@ jobs:
     - name: Build OpenWrt Image
       run: nix develop --command build-nss-image
 
+    - name: Setup tmate session
+      if: failure()
+      uses: mxschmitt/action-tmate@v3
+
     - name: Update Last Built Hash
       if: success() && needs.check_upstream.outputs.latest_hash != ''
       env:
