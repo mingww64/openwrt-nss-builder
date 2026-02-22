@@ -45,13 +45,44 @@
       buildScript = pkgs.writeShellScriptBin "build-nss-image" ''
         set -e
         set -o pipefail
+        
+        PROFILE="linksys_mr7350"
+        SYNC_PACKAGES=0
+        MAKE_ONLY=0
+        MENUCONFIG=0
+
+        while [[ $# -gt 0 ]]; do
+          case $1 in
+            --profile)
+              PROFILE="$2"
+              shift 2
+              ;;
+            --sync-packages)
+              SYNC_PACKAGES=1
+              shift
+              ;;
+            --make-only)
+              MAKE_ONLY=1
+              shift
+              ;;
+            --menuconfig)
+              MENUCONFIG=1
+              shift
+              ;;
+            *)
+              echo "Unknown option: $1"
+              exit 1
+              ;;
+          esac
+        done
+
         EXTRA_PACKAGES=$(cat ./packages.txt || echo "")
-        if [ "$1" == "--sync-packages" ]; then
+        if [ "$SYNC_PACKAGES" -eq 1 ]; then
           LOGFILE="../build-$(date +%Y%m%d-%H%M%S)-sync.log"
           echo "--- Syncing package list from router using ssh ---" | tee -a "$LOGFILE"
 
           # Merge static package list and ssh apk info, remove duplicates
-          SSH_PACKAGES=$(ssh ${routerUser}@${routerIp} "apk info" | grep -vE '(kmod|kernel|base-files|libc|libgcc|qca-nss|nss-dp|ath11k)')
+          SSH_PACKAGES=$(ssh ${routerUser}@${routerIp} "apk info" | grep -vE '(kmod|kernel|base-files|libc|libgcc|qca-nss|nss-dp|ath11k)' || true)
 
           EXTRA_PACKAGES=$(echo "$EXTRA_PACKAGES $SSH_PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ')
         else
@@ -63,9 +94,9 @@
         # Generate config fragment to enable all packages
         cd source
 
-        if [ "$1" == "--make-only" ]; then
+        if [ "$MAKE_ONLY" -eq 1 ]; then
            echo "--- Starting image build (Make only) ---" | tee -a "$LOGFILE"
-           make -j$(nproc) V=s PROFILE="linksys_mr7350" 2>&1 | tee -a "$LOGFILE" || {
+           make -j$(nproc) V=s PROFILE="$PROFILE" 2>&1 | tee -a "$LOGFILE" || {
              echo "Build failed. Check $LOGFILE for details" | tee -a "$LOGFILE"
              exit 1
            }
@@ -73,18 +104,60 @@
            exit 0
         fi
 
-        # Install feeds from pinned flake inputs
-        echo "--- Installing feeds ---" | tee -a "$LOGFILE"
-        ./scripts/feeds update && ./scripts/feeds install -a 2>&1 | tee -a "$LOGFILE"
+        if [ "$MENUCONFIG" -eq 1 ]; then
+           echo "--- Running make menuconfig ---"
+           make menuconfig
+           exit 0
+        fi
 
-        # Make all feeds writable since they are copied from read-only Nix store
-        chmod -R u+w feeds/
+        # Install feeds from pinned flake inputs if they changed
+        if [ -f .feeds_need_update ] || [ ! -d feeds ]; then
+          echo "--- Installing feeds ---" | tee -a "$LOGFILE"
+          ./scripts/feeds update && ./scripts/feeds install -a 2>&1 | tee -a "$LOGFILE"
 
-        # Disable Python PGO to prevent test failures during host build
-        sed -i 's/--enable-optimizations//g' feeds/packages/lang/python/python3/Makefile
+          # Make all feeds writable since they are copied from read-only Nix store
+          chmod -R u+w feeds/
+
+          # Disable Python PGO to prevent test failures during host build
+          sed -i 's/--enable-optimizations//g' feeds/packages/lang/python/python3/Makefile
+          
+          rm -f .feeds_need_update
+        else
+          echo "--- Feeds are up to date, skipping install ---" | tee -a "$LOGFILE"
+        fi
 
         # Build the image using the config seed
-        [ ! -f .config ] && cp nss-setup/config-nss.seed .config
+        [ ! -f .config ] && [ -f nss-setup/config-nss.seed ] && cp nss-setup/config-nss.seed .config
+        
+        # Disable all sub-targets and devices by default in .config
+        sed -i 's/^CONFIG_TARGET_qualcommax_\([a-z0-9]*\)=y/# CONFIG_TARGET_qualcommax_\1 is not set/' .config
+        sed -i 's/^CONFIG_TARGET_qualcommax_[a-z0-9]*_DEVICE_[a-zA-Z0-9_-]*=y/# & is not set/' .config
+        
+        # Fuzzy search for the profile
+        MATCHED_PROFILES=$(grep -io "CONFIG_TARGET_qualcommax_[a-z0-9]*_DEVICE_.*$PROFILE.*" .config | sed 's/ is not set//' | sed 's/=y//' | sed 's/^# //' | sort -u || true)
+        
+        if [ -z "$MATCHED_PROFILES" ]; then
+          echo "❌ Error: Profile '$PROFILE' not found in config-nss.seed" | tee -a "$LOGFILE"
+          exit 1
+        fi
+        
+        MATCH_COUNT=$(echo "$MATCHED_PROFILES" | wc -l)
+        if [ "$MATCH_COUNT" -gt 1 ]; then
+          echo "❌ Error: Multiple profiles matched '$PROFILE':" | tee -a "$LOGFILE"
+          echo "$MATCHED_PROFILES" | tee -a "$LOGFILE"
+          echo "Please be more specific." | tee -a "$LOGFILE"
+          exit 1
+        fi
+        
+        MATCHED_PROFILE="$MATCHED_PROFILES"
+        
+        SUBTARGET=$(echo "$MATCHED_PROFILE" | sed -E 's/CONFIG_TARGET_qualcommax_([a-z0-9]+)_DEVICE_.*/\1/')
+        
+        echo "✅ Found profile: $MATCHED_PROFILE (Subtarget: $SUBTARGET)" | tee -a "$LOGFILE"
+        
+        # Enable the matched subtarget and device
+        echo "CONFIG_TARGET_qualcommax_$SUBTARGET=y" >> .config.fragment
+        echo "$MATCHED_PROFILE=y" >> .config.fragment
         
         if [ -n "$EXTRA_PACKAGES" ]; then
           for pkg in $EXTRA_PACKAGES; do
@@ -93,9 +166,10 @@
               echo "CONFIG_PACKAGE_$pkg=y" >> .config.fragment
             fi
           done
-          cat .config.fragment >> .config
-          rm -f .config.fragment
         fi
+        
+        cat .config.fragment >> .config
+        rm -f .config.fragment
         
         # Use Nixpkgs Go for bootstrap
         echo "CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT=\"$(dirname $(dirname $(which go)))/share/go\"" >> .config
@@ -107,7 +181,7 @@
         make download -j$(nproc) V=s 2>&1 | tee -a "$LOGFILE"
 
         echo "--- Starting image build ---" | tee -a "$LOGFILE"
-        make -j$(nproc) V=s PROFILE="linksys_mr7350" 2>&1 | tee -a "$LOGFILE" || {
+        make -j$(nproc) V=s PROFILE="$PROFILE" 2>&1 | tee -a "$LOGFILE" || {
           echo "Build failed. Check $LOGFILE for details" | tee -a "$LOGFILE"
           exit 1
         }
@@ -187,33 +261,44 @@
               echo "Copying package patches..."
               cp -r patches/package source/
             fi
+          fi
             
-            # Temporary fix for command_all.sh I/O error in GitHub Actions
-            # The script iterates over all PATH entries, which in Nix environment is huge and may contain problematic paths
-            # We replace it with a simpler version that returns the command path without iterating manually
-            # This avoids the "command: command: I/O error" when hitting problematic directories in PATH
-            echo "Patching scripts/command_all.sh to avoid I/O errors..."
-            cat > source/scripts/command_all.sh <<'EOF'
+          # Temporary fix for command_all.sh I/O error in GitHub Actions
+          # The script iterates over all PATH entries, which in Nix environment is huge and may contain problematic paths
+          # We replace it with a simpler version that returns the command path without iterating manually
+          # This avoids the "command: command: I/O error" when hitting problematic directories in PATH
+          echo "Patching scripts/command_all.sh to avoid I/O errors..."
+          cat > source/scripts/command_all.sh <<'EOF'
 #!/bin/sh
 # Replaced by flake.nix shellHook to avoid I/O errors in long Nix paths
 # Just return the first found command, as we provided the correct env via Nix
 command -v "$@"
 EOF
-            chmod +x source/scripts/command_all.sh
-          fi
+          chmod +x source/scripts/command_all.sh
 
           # Prepare writable copies of feeds (separate from ./feeds symlink dir)
           if [ ! -d "source/package/luci-theme-argon" ]; then
             cp -r ${luci-theme-argon} source/package/luci-theme-argon
             chmod -R u+w source/package/luci-theme-argon
           fi
-          cat > source/feeds.conf.default <<EOF
+          
+          # Generate new feeds.conf.default
+          cat > source/feeds.conf.default.new <<EOF
 src-cpy packages ${openwrt-packages}
 src-cpy luci ${openwrt-luci}
 src-cpy routing ${openwrt-routing}
 src-cpy nss_packages ${nss-packages}
 src-cpy sqm_scripts_nss ${sqm-scripts-nss}
 EOF
+          
+          # Check if feeds.conf.default changed
+          if [ -f source/feeds.conf.default ] && cmp -s source/feeds.conf.default source/feeds.conf.default.new; then
+            rm source/feeds.conf.default.new
+          else
+            mv source/feeds.conf.default.new source/feeds.conf.default
+            # Touch a marker file to indicate feeds need updating
+            touch source/.feeds_need_update
+          fi
 
           echo "✅ NSS + APK Build Env Active"
           echo "🚀 Run 'build-nss-image' to start."
