@@ -128,9 +128,16 @@
             git clone -b main-nss https://github.com/qosmio/openwrt-ipq.git source
           fi
 
-          if [ -d "cache" ]; then
-            echo "Restoring cached directories..."
-            cp -r cache/* source/
+          # Setup dl directory for caching
+          if [ ! -L "source/dl" ] && [ -d "dl" ]; then
+            rm -rf source/dl
+            ln -s ../dl source/dl
+          fi
+
+          # Setup ccache directory for caching
+          if [ ! -L "source/.ccache" ] && [ -d ".ccache" ]; then
+            rm -rf source/.ccache
+            ln -s ../.ccache source/.ccache
           fi
 
           # Apply custom patches
