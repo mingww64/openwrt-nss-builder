@@ -163,37 +163,16 @@ EOF
           fi
 
           # Prepare writable copies of feeds (separate from ./feeds symlink dir)
-          mkdir -p source/feeds-src
-          if [ ! -d "source/feeds-src/packages" ]; then
-            cp -r ${openwrt-packages} source/feeds-src/packages
-            chmod -R u+w source/feeds-src/packages
-          fi
-          if [ ! -d "source/feeds-src/luci" ]; then
-            cp -r ${openwrt-luci} source/feeds-src/luci
-            chmod -R u+w source/feeds-src/luci
-          fi
-          if [ ! -d "source/feeds-src/routing" ]; then
-            cp -r ${openwrt-routing} source/feeds-src/routing
-            chmod -R u+w source/feeds-src/routing
-          fi
-          if [ ! -d "source/feeds-src/nss_packages" ]; then
-            cp -r ${nss-packages} source/feeds-src/nss_packages
-            chmod -R u+w source/feeds-src/nss_packages
-          fi
-          if [ ! -d "source/feeds-src/sqm_scripts_nss" ]; then
-            cp -r ${sqm-scripts-nss} source/feeds-src/sqm_scripts_nss
-            chmod -R u+w source/feeds-src/sqm_scripts_nss
-          fi
           if [ ! -d "source/package/luci-theme-argon" ]; then
             cp -r ${luci-theme-argon} source/package/luci-theme-argon
             chmod -R u+w source/package/luci-theme-argon
           fi
           cat > source/feeds.conf.default <<EOF
-src-link packages ../feeds-src/packages
-src-link luci ../feeds-src/luci
-src-link routing ../feeds-src/routing
-src-link nss_packages ../feeds-src/nss_packages
-src-link sqm_scripts_nss ../feeds-src/sqm_scripts_nss
+src-cpy packages ${openwrt-packages}
+src-cpy luci ${openwrt-luci}
+src-cpy routing ${openwrt-routing}
+src-cpy nss_packages ${nss-packages}
+src-cpy sqm_scripts_nss ${sqm-scripts-nss}
 EOF
 
           # Automate device selection for MR7350 in config-nss.seed
