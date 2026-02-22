@@ -215,12 +215,6 @@ src-cpy nss_packages ${nss-packages}
 src-cpy sqm_scripts_nss ${sqm-scripts-nss}
 EOF
 
-          # Automate device selection for MR7350 in config-nss.seed
-          sed -i 's/^# CONFIG_TARGET_qualcommax_ipq60xx_DEVICE_linksys_mr7350 is not set$/CONFIG_TARGET_qualcommax_ipq60xx_DEVICE_linksys_mr7350=y/' source/nss-setup/config-nss.seed
-          sed -i 's/^# CONFIG_TARGET_qualcommax_ipq60xx is not set$/CONFIG_TARGET_qualcommax_ipq60xx=y/' source/nss-setup/config-nss.seed
-
-          sed -i 's/^CONFIG_TARGET_qualcommax_ipq807x=.$/# CONFIG_TARGET_qualcommax_ipq807x is not set/' source/nss-setup/config-nss.seed
-
           echo "✅ NSS + APK Build Env Active"
           echo "🚀 Run 'build-nss-image' to start."
         '';
