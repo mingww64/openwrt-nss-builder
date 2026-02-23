@@ -185,7 +185,12 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add flake.lock
           git commit -m "chore: update flake.lock [skip ci]"
-          git push
+          if ! git pull --rebase origin ${{ github.ref_name }}; then
+            git rebase --abort || true
+            echo "::warning::Rebase failed due to conflicts; skipping flake.lock push. Re-trigger the workflow to retry."
+          else
+            git push || echo "::warning::Push failed (possibly due to concurrent commits); skipping flake.lock push. Re-trigger the workflow to retry."
+          fi
         else
           echo "flake.lock is already up to date."
         fi
