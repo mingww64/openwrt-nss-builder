@@ -11,7 +11,7 @@ on:
 
 jobs:
   check_upstream:
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
       latest_hash: ${{ steps.check.outputs.latest_hash }}
@@ -57,7 +57,13 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Update tzdata
-      run: sudo apt-get update && sudo apt-get install -y tzdata
+      run: sudo apt-get update && sudo apt-get install -y tzdata fuse3
+
+    - name: Enable /dev/fuse
+      run: |
+        sudo modprobe fuse || true
+        sudo chmod 666 /dev/fuse
+        sudo chown root:$(id -gn) /dev/fuse
 
     - name: Install Nix
       uses: cachix/install-nix-action@v25
@@ -87,7 +93,9 @@ jobs:
       run: nix flake update
 
     - name: Build OpenWrt Image
-      run: nix develop --command build-nss-image
+      env:
+        CI: "1"
+      run: nix develop --impure --command build-nss-image
 
     - name: Commit updated flake.lock
       if: success()
@@ -107,7 +115,9 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
-        path: ./**/*.log
+        path: |
+          ./*.log
+          ./**/*.log
         if-no-files-found: warn
 
     - name: Setup SSH Session

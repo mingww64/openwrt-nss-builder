@@ -3,6 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    openwrt-source = {
+      url = "github:qosmio/openwrt-ipq/main-nss";
+      flake = false;
+    };
     openwrt-packages = {
       url = "github:openwrt/packages";
       flake = false;
@@ -29,18 +33,78 @@
     };
   };
 
-  outputs = { self, nixpkgs, openwrt-packages, openwrt-luci, openwrt-routing, nss-packages, sqm-scripts-nss, luci-theme-argon }:
+  outputs = { self, nixpkgs, openwrt-source, openwrt-packages, openwrt-luci, openwrt-routing, nss-packages, sqm-scripts-nss, luci-theme-argon }:
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
       nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
+
+      # Shared helper — tears down FUSE mounts only, preserving upper dirs and build artifacts.
+      # Used for automatic remounting when flake inputs change.
+      makeUnmountScript = pkgs: pkgs.writeShellScriptBin "unmount-nss-mounts" ''
+        export PATH="${pkgs.fuse-overlayfs}/bin:${pkgs.coreutils}/bin:$PATH"
+        echo "Unmounting NSS mounts (build artifacts preserved)..."
+        fusermount3 -uz "$PWD/source" 2>/dev/null || true
+        fusermount3 -uz "$PWD/.source-mapped" 2>/dev/null || true
+        if [ -d .feeds-merged ]; then
+          for d in .feeds-merged/*; do
+            [ -e "$d" ] && fusermount3 -uz "$PWD/$d" 2>/dev/null || true
+          done
+        fi
+        if [ -d .feeds-mapped ]; then
+          for d in .feeds-mapped/*; do
+            [ -e "$d" ] && fusermount3 -uz "$PWD/$d" 2>/dev/null || true
+          done
+        fi
+        echo "Done. Run 'nix develop' to remount with the new inputs."
+      '';
+
+      # Shared helper — full clean: unmounts AND removes all overlay dirs including build artifacts.
+      makeCleanMountsScript = pkgs: pkgs.writeShellScriptBin "clean-nss-mounts" ''
+        export PATH="${pkgs.fuse-overlayfs}/bin:${pkgs.coreutils}/bin:$PATH"
+        echo "Cleaning up mounts..."
+        fusermount3 -uz "$PWD/source" 2>/dev/null || true
+        fusermount3 -uz "$PWD/.source-mapped" 2>/dev/null || true
+        if [ -d .feeds-merged ]; then
+          for d in .feeds-merged/*; do
+            [ -e "$d" ] && fusermount3 -uz "$PWD/$d" 2>/dev/null || true
+          done
+        fi
+        if [ -d .feeds-mapped ]; then
+          for d in .feeds-mapped/*; do
+            [ -e "$d" ] && fusermount3 -uz "$PWD/$d" 2>/dev/null || true
+          done
+        fi
+        echo "Removing overlay directories..."
+        rm -rf "$PWD/.source-upper" "$PWD/.source-work" "$PWD/.source-mapped" "$PWD/.source-lower-staging" "$PWD/.feeds-mapped" "$PWD/.feeds-merged" "$PWD/.feeds-upper" "$PWD/.feeds-work" "$PWD/source"
+        echo "Done. You can now run 'nix flake update' and 'nix develop' to rebuild the environment."
+      '';
     in {
+      apps = forAllSystems (system:
+        let
+          pkgs = nixpkgsFor.${system};
+          cleanMountsScript = makeCleanMountsScript pkgs;
+          unmountScript = makeUnmountScript pkgs;
+        in {
+          clean-nss-mounts = {
+            type = "app";
+            program = "${cleanMountsScript}/bin/clean-nss-mounts";
+          };
+          unmount-nss-mounts = {
+            type = "app";
+            program = "${unmountScript}/bin/unmount-nss-mounts";
+          };
+        });
+
       devShells = forAllSystems (system:
         let
           pkgs = nixpkgsFor.${system};
 
           routerIp = "192.168.15.1";
           routerUser = "root";
+
+      cleanMountsScript = makeCleanMountsScript pkgs;
+      unmountScript = makeUnmountScript pkgs;
 
       buildScript = pkgs.writeShellScriptBin "build-nss-image" ''
         set -e
@@ -83,7 +147,7 @@
           EXTRA_PACKAGES=$(cat "$FLAKE_SOURCE/packages.txt")
         fi
         if [ "$SYNC_PACKAGES" -eq 1 ]; then
-          LOGFILE="../build-$(date +%Y%m%d-%H%M%S)-sync.log"
+          LOGFILE="$PWD/build-$(date +%Y%m%d-%H%M%S)-sync.log"
           echo "--- Syncing package list from router using ssh ---" | tee -a "$LOGFILE"
 
           # Merge static package list and ssh apk info, remove duplicates
@@ -91,13 +155,12 @@
 
           EXTRA_PACKAGES=$(echo "$EXTRA_PACKAGES $SSH_PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ')
         else
-          LOGFILE="../build-$(date +%Y%m%d-%H%M%S).log"
+          LOGFILE="$PWD/build-$(date +%Y%m%d-%H%M%S).log"
         fi
         echo -e "--- Including packages: --- \n $EXTRA_PACKAGES \n--- End of package list ---" | tee -a "$LOGFILE"
 
-        LOGFILE="../build-$(date +%Y%m%d-%H%M%S).log"
         # Generate config fragment to enable all packages
-        cd source
+        cd $PWD/source
 
         if [ "$MAKE_ONLY" -eq 1 ]; then
            echo "--- Starting image build (Make only) ---" | tee -a "$LOGFILE"
@@ -119,15 +182,7 @@
         if [ -f .feeds_need_update ] || [ ! -d feeds ]; then
           echo "--- Installing feeds ---" | tee -a "$LOGFILE"
           
-          # Make existing feeds writable so they can be removed by update
-          if [ -d feeds ]; then
-            chmod -R u+w feeds/ || true
-          fi
-          
           ./scripts/feeds update && ./scripts/feeds install -a 2>&1 | tee -a "$LOGFILE"
-          
-          # Make all feeds writable since they are copied from read-only Nix store
-          chmod -R u+w feeds/          
           
           # Disable Python PGO to prevent test failures during host build
           sed -i 's/--enable-optimizations//g' feeds/packages/lang/python/python3/Makefile
@@ -170,16 +225,22 @@
             echo "  [$((i+1))] ''${PROFILE_ARRAY[$i]}" | tee -a "$LOGFILE"
           done
           
-          # Prompt user for choice
-          while true; do
-            read -p "Select a profile (1-$MATCH_COUNT): " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$MATCH_COUNT" ]; then
-              MATCHED_PROFILE="''${PROFILE_ARRAY[$((choice-1))]}"
-              break
-            else
-              echo "Invalid selection. Please enter a number between 1 and $MATCH_COUNT."
-            fi
-          done
+          # In CI auto-select the first match; otherwise prompt the user
+          if [ -n "$CI" ]; then
+            echo "CI detected: auto-selecting first match." | tee -a "$LOGFILE"
+            MATCHED_PROFILE="''${PROFILE_ARRAY[0]}"
+          else
+            # Prompt user for choice
+            while true; do
+              read -p "Select a profile (1-$MATCH_COUNT): " choice
+              if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$MATCH_COUNT" ]; then
+                MATCHED_PROFILE="''${PROFILE_ARRAY[$((choice-1))]}"
+                break
+              else
+                echo "Invalid selection. Please enter a number between 1 and $MATCH_COUNT."
+              fi
+            done
+          fi
         else
           MATCHED_PROFILE="$MATCHED_PROFILES"
         fi
@@ -207,7 +268,7 @@
         # Use Nixpkgs Go for bootstrap
         echo "CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT=\"$(dirname $(dirname $(which go)))/share/go\"" >> .config
         echo "CONFIG_GOLANG_BUILD_BOOTSTRAP=n" >> .config
-        
+
         make defconfig V=s 2>&1 | tee -a "$LOGFILE"
 
         echo "--- Downloading sources ---" | tee -a "$LOGFILE"
@@ -226,8 +287,8 @@
       commonBuildInputs = with pkgs; [
         stdenv.cc binutils patch perl python3 wget git unzip
         libxslt ncurses zlib openssl bc rsync file gnumake gawk
-        which diffutils gettext openssh direnv buildScript
-        ncurses pkg-config quilt nix-ld ccache go
+        which diffutils gettext openssh direnv buildScript cleanMountsScript unmountScript
+        ncurses pkg-config quilt nix-ld ccache go fuse-overlayfs util-linux bindfs
       ];
 
       commonShellHook = ''
@@ -252,9 +313,96 @@
           export PATH="$PWD/.nix-host-wrappers:$PATH"
           # ---------------------------------------------
 
-          if [ ! -d "source/.git" ]; then
-            echo "Cloning OpenWrt source..."
-            git clone -b main-nss https://github.com/qosmio/openwrt-ipq.git source
+          # Automatically remount if flake inputs have changed.
+          # Only unmounts FUSE mounts — build artifacts in .source-upper are preserved.
+          # Run 'clean-nss-mounts' manually if you want a full clean rebuild.
+          CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}"
+          if [ -f .flake-inputs-hash ] && [ "$(cat .flake-inputs-hash)" != "$CURRENT_INPUTS_HASH" ]; then
+            echo "🔄 Flake inputs changed! Unmounting old mounts (build artifacts preserved)..."
+            unmount-nss-mounts
+          fi
+          echo "$CURRENT_INPUTS_HASH" > .flake-inputs-hash
+
+          # Setup COW for main source and feeds with bindfs permission mapping
+          if ! mountpoint -q source; then
+            echo "Mounting OpenWrt source and feeds using bindfs + fuse-overlayfs..."
+            mkdir -p .source-upper .source-work source .source-mapped
+            
+            run_detached() {
+              bash -c '
+                for fd in $(ls /proc/self/fd); do
+                  [ "$fd" -gt 2 ] && eval "exec $fd>&-" 2>/dev/null
+                done
+                exec "$@" < /dev/null >/dev/null 2>&1
+              ' bash "$@" &
+              disown
+            }
+
+            # Map OpenWrt source to be writable
+            if ! mountpoint -q .source-mapped; then
+              run_detached bindfs --no-allow-other -u $(id -u) -g $(id -g) -p u+rwX,g+rwX,o+rwX ${openwrt-source} .source-mapped
+            fi
+            
+            # Create a merged lowerdir structure
+            mkdir -p .source-lower-staging/package
+            mkdir -p .source-lower-staging/feeds
+            
+            mkdir -p .feeds-mapped/luci-theme-argon
+            mkdir -p .feeds-mapped/packages
+            mkdir -p .feeds-mapped/luci
+            mkdir -p .feeds-mapped/routing
+            mkdir -p .feeds-mapped/nss_packages
+            mkdir -p .feeds-mapped/sqm_scripts_nss
+            mkdir -p .feeds-merged .feeds-upper .feeds-work
+
+            map_feed() {
+              local src=$1
+              local mapped=$2
+              local upper=$3
+              local work=$4
+              local merged=$5
+              if ! mountpoint -q "$mapped"; then
+                run_detached bindfs --no-allow-other -u $(id -u) -g $(id -g) -p u+rwX,g+rwX,o+rwX "$src" "$mapped"
+              fi
+              mkdir -p "$upper" "$work" "$merged"
+              if ! mountpoint -q "$merged"; then
+                # Wait for bindfs to be ready
+                local retries=10
+                while [ $retries -gt 0 ] && ! mountpoint -q "$mapped"; do
+                  sleep 0.2
+                  retries=$((retries - 1))
+                done
+                run_detached fuse-overlayfs -o lowerdir="$mapped",upperdir="$upper",workdir="$work" "$merged"
+              fi
+            }
+
+            map_feed ${luci-theme-argon} .feeds-mapped/luci-theme-argon .feeds-upper/luci-theme-argon .feeds-work/luci-theme-argon .feeds-merged/luci-theme-argon
+            map_feed ${openwrt-packages} .feeds-mapped/packages .feeds-upper/packages .feeds-work/packages .feeds-merged/packages
+            map_feed ${openwrt-luci} .feeds-mapped/luci .feeds-upper/luci .feeds-work/luci .feeds-merged/luci
+            map_feed ${openwrt-routing} .feeds-mapped/routing .feeds-upper/routing .feeds-work/routing .feeds-merged/routing
+            map_feed ${nss-packages} .feeds-mapped/nss_packages .feeds-upper/nss_packages .feeds-work/nss_packages .feeds-merged/nss_packages
+            map_feed ${sqm-scripts-nss} .feeds-mapped/sqm_scripts_nss .feeds-upper/sqm_scripts_nss .feeds-work/sqm_scripts_nss .feeds-merged/sqm_scripts_nss
+            
+            ln -sfn $PWD/.feeds-merged/luci-theme-argon .source-lower-staging/package/luci-theme-argon
+            ln -sfn $PWD/.feeds-merged/packages .source-lower-staging/feeds/packages
+            ln -sfn $PWD/.feeds-merged/luci .source-lower-staging/feeds/luci
+            ln -sfn $PWD/.feeds-merged/routing .source-lower-staging/feeds/routing
+            ln -sfn $PWD/.feeds-merged/nss_packages .source-lower-staging/feeds/nss_packages
+            ln -sfn $PWD/.feeds-merged/sqm_scripts_nss .source-lower-staging/feeds/sqm_scripts_nss
+            
+            run_detached fuse-overlayfs -o lowerdir=.source-lower-staging:.source-mapped,upperdir=.source-upper,workdir=.source-work source
+            
+            # Wait for mounts to be ready
+            sleep 1
+          fi
+
+          # Write a version file so scripts/getver.sh doesn't fall back to "unknown".
+          # getver.sh checks for a 'version' file first (try_version), before trying git.
+          # Without this, REVISION="unknown" and base-files gets version "700101.00001~unknown"
+          # which apk rejects as invalid. We derive the hash directly from the pinned flake
+          # input — no git required at runtime.
+          if [ ! -f source/version ]; then
+            echo "r0-${builtins.substring 0 7 (builtins.toString openwrt-source.rev)}" > source/version
           fi
 
           # Setup dl directory for caching
@@ -302,9 +450,8 @@
             # This handles structure like patches/package/utils/util-linux/patches/100-...
             if [ -d "$PATCH_DIR/package" ]; then
               echo "Copying package patches..."
-              # Use rsync to merge directories and ensure copied files are writable
+              # Use rsync to merge directories. COW handles writability automatically.
               rsync -a --no-perms "$PATCH_DIR/package/" source/package/
-              chmod -R u+w source/package/
             fi
           fi
             
@@ -320,20 +467,14 @@
 command -v "$@"
 EOF
           chmod +x source/scripts/command_all.sh
-
-          # Prepare writable copies of feeds (separate from ./feeds symlink dir)
-          if [ ! -d "source/package/luci-theme-argon" ]; then
-            cp -r ${luci-theme-argon} source/package/luci-theme-argon
-            chmod -R u+w source/package/luci-theme-argon
-          fi
           
-          # Generate new feeds.conf.default
+          # Generate new feeds.conf.default using src-link to our COW merged directories
           cat > source/feeds.conf.default.new <<EOF
-src-cpy packages ${openwrt-packages}
-src-cpy luci ${openwrt-luci}
-src-cpy routing ${openwrt-routing}
-src-cpy nss_packages ${nss-packages}
-src-cpy sqm_scripts_nss ${sqm-scripts-nss}
+src-link packages $PWD/.feeds-merged/packages
+src-link luci $PWD/.feeds-merged/luci
+src-link routing $PWD/.feeds-merged/routing
+src-link nss_packages $PWD/.feeds-merged/nss_packages
+src-link sqm_scripts_nss $PWD/.feeds-merged/sqm_scripts_nss
 EOF
           
           # Check if feeds.conf.default changed

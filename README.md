@@ -28,6 +28,81 @@ build-nss-image --profile mr7350
 - `--make-only`: Skip setup/downloads and jump straight to compilation.
 - `--sync-packages`: SSH into a live router and sync its installed packages into your build.
 
+### 🔄 Updating the Flake
+When you want to pull the latest upstream OpenWrt commits and feed updates:
+1. Run `nix flake update` to fetch the latest inputs.
+2. Run `nix develop` to enter the shell. The environment will automatically detect the new inputs, clean up the old mounts, and mount the fresh source tree!
+
+*(If you ever need to manually clean the mounts from outside the shell, you can run `nix run .#clean-nss-mounts`)*
+
+## 🗂️ Filesystem Layer Architecture
+
+Because the Nix store is read-only, the build environment constructs a writable
+view of the OpenWrt source tree entirely in userspace using `bindfs` and
+`fuse-overlayfs`. No root privileges are required.
+
+```
+Nix store (read-only)
+ ├── openwrt-source  ──bindfs──►  .source-mapped/          (permission-remapped, still read-only data)
+ ├── openwrt-packages ─bindfs──►  .feeds-mapped/packages/
+ ├── openwrt-luci ─────bindfs──►  .feeds-mapped/luci/
+ ├── openwrt-routing ──bindfs──►  .feeds-mapped/routing/
+ ├── nss-packages ─────bindfs──►  .feeds-mapped/nss_packages/
+ ├── sqm-scripts-nss ──bindfs──►  .feeds-mapped/sqm_scripts_nss/
+ └── luci-theme-argon ─bindfs──►  .feeds-mapped/luci-theme-argon/
+                                          │
+                                          ▼
+                               fuse-overlayfs (per feed)
+                               lower:  .feeds-mapped/<name>/
+                               upper:  .feeds-upper/<name>/   ← writes land here
+                               work:   .feeds-work/<name>/
+                                    │
+                                    ▼
+                              .feeds-merged/<name>/          (fully writable COW view)
+                                          │
+                              symlinked into
+                                          │
+                         .source-lower-staging/
+                          ├── feeds/
+                          │    ├── packages  ──►  .feeds-merged/packages
+                          │    ├── luci       ──►  .feeds-merged/luci
+                          │    ├── routing    ──►  .feeds-merged/routing
+                          │    ├── nss_packages ►  .feeds-merged/nss_packages
+                          │    └── sqm_scripts_nss ► .feeds-merged/sqm_scripts_nss
+                          └── package/
+                               └── luci-theme-argon ► .feeds-merged/luci-theme-argon
+                                          │
+                              merged as lowerdir alongside
+                              .source-mapped  in the root overlay
+                                          │
+                                          ▼
+                               fuse-overlayfs  (root source overlay)
+                               lower:  .source-lower-staging : .source-mapped
+                               upper:  .source-upper/        ← all other writes land here
+                               work:   .source-work/
+                                    │
+                                    ▼
+                                 source/                     (fully writable working tree)
+```
+
+**Why two layers per feed?**
+`fuse-overlayfs` does not follow symlinks across FUSE boundaries, so simply
+symlinking `.source-lower-staging/feeds/<name>` → `.feeds-mapped/<name>` would
+expose the read-only bindfs layer. Each feed therefore gets its own
+`bindfs` → `fuse-overlayfs` stack, producing `.feeds-merged/<name>` as a fully
+writable COW directory. That directory is then symlinked into the root overlay's
+lowerdir so it appears naturally at `source/feeds/<name>`.
+
+**Why can't feeds be mounted directly at `source/feeds/<name>`?**
+Linux does not permit mounting inside an active FUSE filesystem from the same
+user namespace, so `source/feeds/` (which lives inside the root `fuse-overlayfs`)
+cannot be used as a mountpoint.
+
+**Cleanup**
+All mounts are torn down automatically when you `exit` the Nix shell. For
+direnv sessions (where the shell persists), use `clean-nss-mounts` or
+`nix run .#clean-nss-mounts` to unmount and remove all overlay directories.
+
 ## 🤖 CI/CD Supercharged
 
 Fully automated GitHub Actions pipeline included out-of-the-box:

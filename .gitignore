@@ -4,3 +4,5 @@ source/
 .nix-host-wrappers/
 dl/
 *.log
+.feeds-*/
+.source-*/
