@@ -105,6 +105,11 @@ jobs:
           ${{ runner.os }}-openwrt-ccache-${{ matrix.device.profile }}-
           ${{ runner.os }}-openwrt-ccache-
 
+    - name: Prepare cache directories
+      run: |
+        mkdir -p dl
+        mkdir -p .ccache
+
     - name: Update flake.lock
       run: nix flake update
 
