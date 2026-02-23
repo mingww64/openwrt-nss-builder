@@ -31,9 +31,9 @@ build-nss-image --profile mr7350
 ### 🔄 Updating the Flake
 When you want to pull the latest upstream OpenWrt commits and feed updates:
 1. Run `nix flake update` to fetch the latest inputs.
-2. Run `nix develop` to enter the shell. The environment will automatically detect the new inputs, clean up the old mounts, and mount the fresh source tree!
+2. Run `nix develop` — the environment automatically detects changed inputs, **unmounts the old FUSE mounts** (your `build_dir/`, `staging_dir/`, and `.config` are preserved in `.source-upper/`), and remounts the fresh source tree.
 
-*(If you ever need to manually clean the mounts from outside the shell, you can run `nix run .#clean-nss-mounts`)*
+> **Want a fully clean rebuild?** Run `clean-nss-mounts` (or `nix run .#clean-nss-mounts` from outside the shell) to wipe all overlay directories including build artefacts, then `nix develop`.
 
 ## 🗂️ Filesystem Layer Architecture
 
@@ -99,9 +99,14 @@ user namespace, so `source/feeds/` (which lives inside the root `fuse-overlayfs`
 cannot be used as a mountpoint.
 
 **Cleanup**
-All mounts are torn down automatically when you `exit` the Nix shell. For
-direnv sessions (where the shell persists), use `clean-nss-mounts` or
-`nix run .#clean-nss-mounts` to unmount and remove all overlay directories.
+Two commands are available depending on what you need:
+
+| Command | Effect |
+|---|---|
+| `unmount-nss-mounts` / `nix run .#unmount-nss-mounts` | Tears down FUSE mounts only. Build artefacts in `.source-upper/` are **preserved**. Used automatically on flake input change. |
+| `clean-nss-mounts` / `nix run .#clean-nss-mounts` | Full wipe: unmounts **and** removes all overlay dirs including `.source-upper/`. Use when you want a clean rebuild from scratch. |
+
+For direnv sessions (where the shell persists between re-entries), mounts are intentionally kept alive — use one of the above commands manually when needed.
 
 ## 🤖 CI/CD Supercharged
 
