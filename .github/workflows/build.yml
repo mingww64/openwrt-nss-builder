@@ -113,14 +113,21 @@ jobs:
         CI: "1"
       run: nix develop --impure --command build-nss-image --profile ${{ matrix.device.profile }}
 
+    - name: Collect logs on failure
+      if: failure()
+      run: |
+        mkdir -p /tmp/build-logs
+        find . -maxdepth 8 -name "*.log" \
+          ! -path "*/build_dir/host/*" \
+          ! -path "*/build_dir/toolchain/*" \
+          -exec cp --parents {} /tmp/build-logs/ \; 2>/dev/null || true
+
     - name: Upload logs on failure
       if: failure()
       uses: actions/upload-artifact@v4
       with:
         name: build-logs-${{ matrix.device.profile }}
-        path: |
-          ./*.log
-          ./**/*.log
+        path: /tmp/build-logs/
         if-no-files-found: warn
 
     - name: Setup SSH Session
