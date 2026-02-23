@@ -151,7 +151,7 @@
           echo "--- Syncing package list from router using ssh ---" | tee -a "$LOGFILE"
 
           # Merge static package list and ssh apk info, remove duplicates
-          SSH_PACKAGES=$(ssh ${routerUser}@${routerIp} "apk info" | grep -vE '(kmod|kernel|base-files|libc|libgcc|qca-nss|nss-dp|ath11k)' || true)
+          SSH_PACKAGES=$(ssh ${routerUser}@${routerIp} "apk info" | grep -vE '(kmod|kernel|base-files|libc|libgcc|qca-|nss-dp|ath11k|ipq-wifi-)' || true)
 
           EXTRA_PACKAGES=$(echo "$EXTRA_PACKAGES $SSH_PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ')
         else
