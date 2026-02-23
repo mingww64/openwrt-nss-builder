@@ -53,6 +53,20 @@ jobs:
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        device:
+          - { profile: linksys_mr7350,     name: "Linksys MR7350"       }
+          - { profile: linksys_mr7500,     name: "Linksys MR7500"       }
+          - { profile: glinet_gl-ax1800,   name: "GL.iNet GL-AX1800"    }
+          - { profile: glinet_gl-axt1800,  name: "GL.iNet GL-AXT1800"   }
+          - { profile: linksys_mx4200v2,   name: "Linksys MX4200 v2"    }
+          - { profile: linksys_mx4300,     name: "Linksys MX4300"       }
+          - { profile: netgear_wax620,     name: "Netgear WAX620"       }
+          - { profile: dynalink_dl-wrx36,  name: "Dynalink DL-WRX36"   }
+          - { profile: zyxel_nbg7815,      name: "Zyxel NBG7815"        }
+          - { profile: xiaomi_ax3600,      name: "Xiaomi AX3600"        }
     steps:
     - uses: actions/checkout@v4
 
@@ -77,44 +91,33 @@ jobs:
       uses: actions/cache@v4
       with:
         path: dl
-        key: ${{ runner.os }}-openwrt-dl-${{ needs.check_upstream.outputs.latest_hash }}-${{ hashFiles('flake.nix', 'packages.txt') }}
+        key: ${{ runner.os }}-openwrt-dl-${{ matrix.device.profile }}-${{ needs.check_upstream.outputs.latest_hash }}-${{ hashFiles('flake.nix', 'packages.txt') }}
         restore-keys: |
+          ${{ runner.os }}-openwrt-dl-${{ matrix.device.profile }}-
           ${{ runner.os }}-openwrt-dl-
 
     - name: Cache OpenWrt ccache
       uses: actions/cache@v4
       with:
         path: .ccache
-        key: ${{ runner.os }}-openwrt-ccache-${{ github.sha }}
+        key: ${{ runner.os }}-openwrt-ccache-${{ matrix.device.profile }}-${{ github.sha }}
         restore-keys: |
+          ${{ runner.os }}-openwrt-ccache-${{ matrix.device.profile }}-
           ${{ runner.os }}-openwrt-ccache-
 
     - name: Update flake.lock
       run: nix flake update
 
-    - name: Build OpenWrt Image
+    - name: Build OpenWrt Image (${{ matrix.device.name }})
       env:
         CI: "1"
-      run: nix develop --impure --command build-nss-image
-
-    - name: Commit updated flake.lock
-      if: success()
-      run: |
-        if [[ -n "$(git status --porcelain flake.lock)" ]]; then
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add flake.lock
-          git commit -m "chore: update flake.lock [skip ci]"
-          git push
-        else
-          echo "flake.lock is already up to date."
-        fi
+      run: nix develop --impure --command build-nss-image --profile ${{ matrix.device.profile }}
 
     - name: Upload logs on failure
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs
+        name: build-logs-${{ matrix.device.profile }}
         path: |
           ./*.log
           ./**/*.log
@@ -124,22 +127,10 @@ jobs:
       if: failure()
       uses: Warpbuilds/action-debugger@v1.3
 
-    - name: Update Last Built Hash
-      if: success() && needs.check_upstream.outputs.latest_hash != ''
-      env:
-        GH_TOKEN: ${{ secrets.WRITE_TO_VAR }}
-      run: |
-        echo "Updating LAST_BUILT_HASH to ${{ needs.check_upstream.outputs.latest_hash }}"
-        
-        # Using the GitHub CLI to set the variable
-        gh variable set LAST_BUILT_HASH \
-          --body "${{ needs.check_upstream.outputs.latest_hash }}" \
-          --repo ${{ github.repository }}
-
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: openwrt-build-artifacts
+        name: openwrt-${{ matrix.device.profile }}
         path: source/bin/
         if-no-files-found: warn
 
@@ -155,6 +146,49 @@ jobs:
         token: ${{ secrets.RELEASE_TOKEN }}
         prerelease: true
         body: |
+          ## ${{ matrix.device.name }}
+
           * **Upstream Commit:** https://github.com/qosmio/openwrt-ipq/commit/${{ needs.check_upstream.outputs.latest_hash || 'N/A' }}
           * **Build Commit:** ${{ github.sha }}
           * **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+  post_build:
+    needs: [check_upstream, build]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.ref }}
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v25
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+
+    - name: Update flake.lock
+      run: nix flake update
+
+    - name: Commit updated flake.lock
+      run: |
+        if [[ -n "$(git status --porcelain flake.lock)" ]]; then
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add flake.lock
+          git commit -m "chore: update flake.lock [skip ci]"
+          git push
+        else
+          echo "flake.lock is already up to date."
+        fi
+
+    - name: Update Last Built Hash
+      if: needs.check_upstream.outputs.latest_hash != ''
+      env:
+        GH_TOKEN: ${{ secrets.WRITE_TO_VAR }}
+      run: |
+        echo "Updating LAST_BUILT_HASH to ${{ needs.check_upstream.outputs.latest_hash }}"
+        gh variable set LAST_BUILT_HASH \
+          --body "${{ needs.check_upstream.outputs.latest_hash }}" \
+          --repo ${{ github.repository }}
