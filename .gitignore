@@ -6,3 +6,4 @@ dl/
 *.log
 .feeds-*/
 .source-*/
+.flake-inputs-hash
