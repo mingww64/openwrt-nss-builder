@@ -151,11 +151,10 @@ jobs:
           source/bin/targets/**/*.bin
           source/bin/targets/**/*.itb
         tag_name: ${{ needs.check_upstream.outputs.latest_hash || github.sha }}
-        name: OpenWrt NSS Build ${{ needs.check_upstream.outputs.latest_hash || github.sha }}
+        name: OpenWrt NSS Build
         token: ${{ secrets.RELEASE_TOKEN }}
+        prerelease: true
         body: |
-          ## OpenWrt NSS Build
-          
-          * **Upstream Hash:** ${{ needs.check_upstream.outputs.latest_hash || 'N/A' }}
+          * **Upstream Commit:** https://github.com/qosmio/openwrt-ipq/commit/${{ needs.check_upstream.outputs.latest_hash || 'N/A' }}
           * **Build Commit:** ${{ github.sha }}
           * **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
