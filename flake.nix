@@ -405,16 +405,18 @@
             echo "r0-${builtins.substring 0 7 (builtins.toString openwrt-source.rev)}" > source/version
           fi
 
-          # Setup dl directory for caching
-          if [ ! -L "source/dl" ] && [ -d "dl" ]; then
-            rm -rf source/dl
-            ln -s ../dl source/dl
+          # Setup dl directory for caching (create unconditionally so cache action can save it)
+          mkdir -p "$PWD/dl"
+          if [ ! -L "$PWD/source/dl" ]; then
+            rm -rf "$PWD/source/dl"
+            ln -s "$PWD/dl" "$PWD/source/dl"
           fi
 
-          # Setup ccache directory for caching
-          if [ ! -L "source/.ccache" ] && [ -d ".ccache" ]; then
-            rm -rf source/.ccache
-            ln -s ../.ccache source/.ccache
+          # Setup ccache directory for caching (create unconditionally so cache action can save it)
+          mkdir -p "$PWD/.ccache"
+          if [ ! -L "$PWD/source/.ccache" ]; then
+            rm -rf "$PWD/source/.ccache"
+            ln -s "$PWD/.ccache" "$PWD/source/.ccache"
           fi
 
           # Apply custom patches
