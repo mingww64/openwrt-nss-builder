@@ -48,9 +48,39 @@ jobs:
             echo "should_build=false" >> $GITHUB_OUTPUT
           fi
 
+  prepare_release:
+    needs: check_upstream
+    if: ${{ needs.check_upstream.outputs.should_build == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_tag: ${{ steps.release_tag.outputs.value }}
+    steps:
+      - name: Compute release tag
+        id: release_tag
+        run: |
+          SHORT="${{ needs.check_upstream.outputs.short_hash }}"
+          if [ -z "$SHORT" ]; then
+            SHORT="${GITHUB_SHA:0:8}"
+          fi
+          echo "value=nss-$SHORT" >> $GITHUB_OUTPUT
+
+      - name: Create Draft Release
+        uses: softprops/action-gh-release@v2.4.2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.value }}
+          name: OpenWrt NSS Build (${{ steps.release_tag.outputs.value }})
+          token: ${{ secrets.RELEASE_TOKEN }}
+          prerelease: true
+          draft: true
+          body: |
+            * **Upstream Commit:** https://github.com/qosmio/openwrt-ipq/commit/${{ needs.check_upstream.outputs.latest_hash || 'N/A' }}
+            * **Build Commit:** ${{ github.sha }}
+            * **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
   build:
-    needs: check_upstream
+    needs: [check_upstream, prepare_release]
     if: ${{ needs.check_upstream.outputs.should_build == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' }}
     runs-on: ubuntu-24.04-arm
     permissions:
@@ -143,15 +173,6 @@ jobs:
         path: source/bin/
         if-no-files-found: warn
 
-    - name: Compute release tag
-      id: release_tag
-      run: |
-        SHORT="${{ needs.check_upstream.outputs.short_hash }}"
-        if [ -z "$SHORT" ]; then
-          SHORT="${GITHUB_SHA:0:8}"
-        fi
-        echo "value=nss-$SHORT" >> $GITHUB_OUTPUT
-
     - name: Upload to Release
       uses: softprops/action-gh-release@v2.4.2
       if: success()
@@ -159,17 +180,28 @@ jobs:
         files: |
           source/bin/targets/**/*.bin
           source/bin/targets/**/*.itb
-        tag_name: ${{ steps.release_tag.outputs.value }}
-        name: OpenWrt NSS Build (${{ steps.release_tag.outputs.value }})
+        tag_name: ${{ needs.prepare_release.outputs.release_tag }}
+        name: OpenWrt NSS Build (${{ needs.prepare_release.outputs.release_tag }})
         token: ${{ secrets.RELEASE_TOKEN }}
         prerelease: true
+        draft: true
         append_body: true
         body: |
-          ## ${{ matrix.device.name }}
-
-          * **Upstream Commit:** https://github.com/qosmio/openwrt-ipq/commit/${{ needs.check_upstream.outputs.latest_hash || 'N/A' }}
-          * **Build Commit:** ${{ github.sha }}
-          * **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          * ${{ matrix.device.name }}
+  finalize_release:
+    needs: [prepare_release, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Mark Release as Latest
+        uses: softprops/action-gh-release@v2.4.2
+        with:
+          tag_name: ${{ needs.prepare_release.outputs.release_tag }}
+          token: ${{ secrets.RELEASE_TOKEN }}
+          draft: false
+          prerelease: true
+          make_latest: true
 
   post_build:
     needs: [check_upstream, build]
