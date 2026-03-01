@@ -381,7 +381,7 @@
 
                     # Map OpenWrt source to be writable
                     if ! mountpoint -q .source-mapped; then
-                      run_detached bindfs --no-allow-other -u $(id -u) -g $(id -g) -p u+rwX,g+rwX,o+rwX ${openwrt-source} .source-mapped
+                      run_detached bindfs --no-allow-other -u $(id -u) -g $(id -g) -p a-w,u+w ${openwrt-source} .source-mapped
                     fi
 
                     # Create a merged lowerdir structure
@@ -403,7 +403,7 @@
                       local work=$4
                       local merged=$5
                       if ! mountpoint -q "$mapped"; then
-                        run_detached bindfs --no-allow-other -u $(id -u) -g $(id -g) -p u+rwX,g+rwX,o+rwX "$src" "$mapped"
+                        run_detached bindfs --no-allow-other -u $(id -u) -g $(id -g) -p a-w,u+w "$src" "$mapped"
                       fi
                       mkdir -p "$upper" "$work" "$merged"
                       if ! mountpoint -q "$merged"; then
