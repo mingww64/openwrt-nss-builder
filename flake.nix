@@ -31,6 +31,14 @@
       url = "github:jerrykuku/luci-theme-argon";
       flake = false;
     };
+    luci-app-argon-config = {
+      url = "github:jerrykuku/luci-app-argon-config";
+      flake = false;
+    };
+    luci-app-pushbot = {
+      url = "github:zzsj0928/luci-app-pushbot";
+      flake = false;
+    };
   };
 
   outputs = {
@@ -43,6 +51,8 @@
     nss-packages,
     sqm-scripts-nss,
     luci-theme-argon,
+    luci-app-argon-config,
+    luci-app-pushbot,
   }: let
     supportedSystems = ["x86_64-linux" "aarch64-linux"];
     forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
@@ -117,7 +127,7 @@
 
       buildScript = pkgs.writeShellScriptBin "build-nss-image" ''
         set -e
-        if ["$CI" == 1]; then
+        if [ -n "$CI" ] && [ "$CI" -eq 1 ]; then
           set -o pipefail
         fi
 
@@ -125,6 +135,8 @@
         SYNC_PACKAGES=0
         MAKE_ONLY=0
         MENUCONFIG=0
+        BUILD_IB=0
+        BUILD_SDK=0
 
         while [[ $# -gt 0 ]]; do
           case $1 in
@@ -144,6 +156,14 @@
               MENUCONFIG=1
               shift
               ;;
+            --imagebuilder)
+              BUILD_IB=1
+              shift
+              ;;
+            --sdk)
+              BUILD_SDK=1
+              shift
+              ;;
             *)
               echo "Unknown option: $1"
               exit 1
@@ -156,6 +176,13 @@
           EXTRA_PACKAGES=$(cat ./packages.txt)
         elif [ -f "$FLAKE_SOURCE/packages.txt" ]; then
           EXTRA_PACKAGES=$(cat "$FLAKE_SOURCE/packages.txt")
+        fi
+
+        EXTRA_CONFIG=""
+        if [ -f ./config.txt ]; then
+          EXTRA_CONFIG="$PWD/config.txt"
+        elif [ -f "$FLAKE_SOURCE/config.txt" ]; then
+          EXTRA_CONFIG="$FLAKE_SOURCE/config.txt"
         fi
         if [ "$SYNC_PACKAGES" -eq 1 ]; then
           LOGFILE="$PWD/build-$(date +%Y%m%d-%H%M%S)-sync.log"
@@ -260,6 +287,21 @@
 
         echo "✅ Found profile: $MATCHED_PROFILE (Subtarget: $SUBTARGET)" | tee -a "$LOGFILE"
 
+        DEVICE_NAME=$(echo "$MATCHED_PROFILE" | sed -E 's/CONFIG_TARGET_qualcommax_[a-z0-9]+_DEVICE_(.*)/\1/')
+
+        # Fuzzy search for device-specific package files
+        DEVICE_PKG_FILES=$(find .. "$FLAKE_SOURCE" -maxdepth 1 -type f -iname "*package*$DEVICE_NAME*.txt" ! -name "packages.txt" -exec readlink -f {} + 2>/dev/null | sort -u || true)
+        if [ -z "$DEVICE_PKG_FILES" ]; then
+          DEVICE_PKG_FILES=$(find .. "$FLAKE_SOURCE" -maxdepth 1 -type f -iname "*package*$PROFILE*.txt" ! -name "packages.txt" -exec readlink -f {} + 2>/dev/null | sort -u || true)
+        fi
+
+        if [ -n "$DEVICE_PKG_FILES" ]; then
+          for f in $DEVICE_PKG_FILES; do
+            echo "--- Appending device package file: $(basename "$f") ---" | tee -a "$LOGFILE"
+            EXTRA_PACKAGES="$EXTRA_PACKAGES $(cat "$f")"
+          done
+        fi
+
         # Enable the matched subtarget and device
         echo "CONFIG_TARGET_qualcommax_$SUBTARGET=y" >> .config.fragment
         echo "$MATCHED_PROFILE=y" >> .config.fragment
@@ -279,6 +321,34 @@
         # Use Nixpkgs Go for bootstrap
         echo "CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT=\"$(dirname $(dirname $(which go)))/share/go\"" >> .config
         echo "CONFIG_GOLANG_BUILD_BOOTSTRAP=n" >> .config
+
+        if [ "$BUILD_IB" -eq 1 ]; then
+          echo "--- Enabling ImageBuilder build ---"
+          echo "CONFIG_IB=y" >> .config
+        fi
+
+        if [ "$BUILD_SDK" -eq 1 ]; then
+          echo "--- Enabling SDK build ---"
+          echo "CONFIG_SDK=y" >> .config
+        fi
+
+        if [ -n "$EXTRA_CONFIG" ]; then
+          echo "--- Appending extra config from $(basename "$EXTRA_CONFIG") ---" | tee -a "$LOGFILE"
+          cat "$EXTRA_CONFIG" >> .config
+        fi
+
+        # Fuzzy search for device-specific config files (avoid matching global config.txt)
+        DEVICE_CONF_FILES=$(find .. "$FLAKE_SOURCE" -maxdepth 1 -type f -iname "*config*$DEVICE_NAME*.txt" ! -name "config.txt" -exec readlink -f {} + 2>/dev/null | sort -u || true)
+        if [ -z "$DEVICE_CONF_FILES" ]; then
+          DEVICE_CONF_FILES=$(find .. "$FLAKE_SOURCE" -maxdepth 1 -type f -iname "*config*$PROFILE*.txt" ! -name "config.txt" -exec readlink -f {} + 2>/dev/null | sort -u || true)
+        fi
+
+        if [ -n "$DEVICE_CONF_FILES" ]; then
+          for f in $DEVICE_CONF_FILES; do
+            echo "--- Appending device config from $(basename "$f") ---" | tee -a "$LOGFILE"
+            cat "$f" >> .config
+          done
+        fi
 
         make defconfig V=s 2>&1 | tee -a "$LOGFILE"
 
@@ -335,7 +405,6 @@
       commonShellHook = ''
                   export NIX_LD="$(cat ${pkgs.stdenv.cc}/nix-support/dynamic-linker)"
                   export NIX_LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib"
-                  export TZ=UTC
                   export FLAKE_SOURCE="${self}"
 
                   # --- DYNAMIC FIX FOR NATIVE WRAPPER BYPASS ---
@@ -357,7 +426,7 @@
                   # Automatically remount if flake inputs have changed.
                   # Only unmounts FUSE mounts — build artifacts in .source-upper are preserved.
                   # Run 'clean-nss-mounts' manually if you want a full clean rebuild.
-                  CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}"
+                  CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}-${luci-app-argon-config.narHash}-${luci-app-pushbot.narHash}"
                   if [ -f .flake-inputs-hash ] && [ "$(cat .flake-inputs-hash)" != "$CURRENT_INPUTS_HASH" ]; then
                     echo "🔄 Flake inputs changed! Unmounting old mounts (build artifacts preserved)..."
                     unmount-nss-mounts
@@ -394,6 +463,8 @@
                     mkdir -p .feeds-mapped/routing
                     mkdir -p .feeds-mapped/nss_packages
                     mkdir -p .feeds-mapped/sqm_scripts_nss
+                    mkdir -p .feeds-mapped/luci_app_argon_config
+                    mkdir -p .feeds-mapped/luci_app_pushbot
                     mkdir -p .feeds-merged .feeds-upper .feeds-work
 
                     map_feed() {
@@ -423,6 +494,8 @@
                     map_feed ${openwrt-routing} .feeds-mapped/routing .feeds-upper/routing .feeds-work/routing .feeds-merged/routing
                     map_feed ${nss-packages} .feeds-mapped/nss_packages .feeds-upper/nss_packages .feeds-work/nss_packages .feeds-merged/nss_packages
                     map_feed ${sqm-scripts-nss} .feeds-mapped/sqm_scripts_nss .feeds-upper/sqm_scripts_nss .feeds-work/sqm_scripts_nss .feeds-merged/sqm_scripts_nss
+                    map_feed ${luci-app-argon-config} .feeds-mapped/luci_app_argon_config .feeds-upper/luci_app_argon_config .feeds-work/luci_app_argon_config .feeds-merged/luci_app_argon_config
+                    map_feed ${luci-app-pushbot} .feeds-mapped/luci_app_pushbot .feeds-upper/luci_app_pushbot .feeds-work/luci_app_pushbot .feeds-merged/luci_app_pushbot
 
                     ln -sfn $PWD/.feeds-merged/luci-theme-argon .source-lower-staging/package/luci-theme-argon
                     ln -sfn $PWD/.feeds-merged/packages .source-lower-staging/feeds/packages
@@ -430,6 +503,8 @@
                     ln -sfn $PWD/.feeds-merged/routing .source-lower-staging/feeds/routing
                     ln -sfn $PWD/.feeds-merged/nss_packages .source-lower-staging/feeds/nss_packages
                     ln -sfn $PWD/.feeds-merged/sqm_scripts_nss .source-lower-staging/feeds/sqm_scripts_nss
+                    ln -sfn $PWD/.feeds-merged/luci_app_argon_config .source-lower-staging/package/luci-app-argon-config
+                    ln -sfn $PWD/.feeds-merged/luci_app_pushbot .source-lower-staging/package/luci-app-pushbot
 
                     run_detached fuse-overlayfs -o lowerdir=.source-lower-staging:.source-mapped,upperdir=.source-upper,workdir=.source-work source
 

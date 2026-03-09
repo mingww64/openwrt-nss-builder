@@ -6,8 +6,23 @@ on:
   push:
     branches: [ "master", "main" ]
   workflow_dispatch:
+    inputs:
+      build_ib:
+        description: 'Build ImageBuilder'
+        required: false
+        type: boolean
+        default: true
+      build_sdk:
+        description: 'Build SDK'
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: '0 */6 * * *'  # Check for updates every 6 hours
+ 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check_upstream:
@@ -65,6 +80,16 @@ jobs:
             SHORT="${GITHUB_SHA:0:8}"
           fi
           echo "value=nss-$SHORT" >> $GITHUB_OUTPUT
+      - uses: actions/checkout@v4
+      - name: Install Nix
+        uses: cachix/install-nix-action@v25
+      - name: Pre-update flake.lock
+        run: nix flake update
+      - name: Upload flake.lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: flake-lock
+          path: flake.lock
 
       - name: Create Draft Release
         uses: softprops/action-gh-release@v2.4.2
@@ -89,18 +114,28 @@ jobs:
       fail-fast: false
       matrix:
         device:
-          - { profile: linksys_mr7350,     name: "Linksys MR7350"       }
-          - { profile: linksys_mr7500,     name: "Linksys MR7500"       }
-          - { profile: glinet_gl-ax1800,   name: "GL.iNet GL-AX1800"    }
-          - { profile: glinet_gl-axt1800,  name: "GL.iNet GL-AXT1800"   }
-          - { profile: linksys_mx4200v2,   name: "Linksys MX4200 v2"    }
-          - { profile: linksys_mx4300,     name: "Linksys MX4300"       }
-          - { profile: netgear_wax620,     name: "Netgear WAX620"       }
-          - { profile: dynalink_dl-wrx36,  name: "Dynalink DL-WRX36"   }
-          - { profile: zyxel_nbg7815,      name: "Zyxel NBG7815"        }
-          - { profile: xiaomi_ax3600,      name: "Xiaomi AX3600"        }
+          - { profile: linksys_mr7350,     primary: true,  name: "Linksys MR7350"       } # ipq60xx
+          - { profile: linksys_mr7500,     primary: false, name: "Linksys MR7500"       } # ipq60xx
+          - { profile: glinet_gl-ax1800,   primary: false, name: "GL.iNet GL-AX1800"    } # ipq60xx
+          - { profile: glinet_gl-axt1800,  primary: false, name: "GL.iNet GL-AXT1800"   } # ipq60xx
+          - { profile: linksys_mx4200v2,   primary: true,  name: "Linksys MX4200 v2"    } # ipq807x
+          - { profile: linksys_mx4300,     primary: false, name: "Linksys MX4300"       } # ipq807x
+          - { profile: netgear_wax620,     primary: false, name: "Netgear WAX620"       } # ipq807x
+          - { profile: dynalink_dl-wrx36,  primary: false, name: "Dynalink DL-WRX36"    } # ipq807x
+          - { profile: zyxel_nbg7815,      primary: false, name: "Zyxel NBG7815"        } # ipq807x
+          - { profile: xiaomi_ax3600,      primary: false, name: "Xiaomi AX3600"        } # ipq807x
     steps:
     - uses: actions/checkout@v4
+
+    - name: Free Disk Space
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY"
+        df -h
+
+    - name: Download flake.lock
+      uses: actions/download-artifact@v4
+      with:
+        name: flake-lock
 
     - name: Update tzdata
       run: sudo apt-get update && sudo apt-get install -y tzdata fuse3
@@ -123,27 +158,38 @@ jobs:
       uses: actions/cache@v4
       with:
         path: dl
-        key: ${{ runner.os }}-openwrt-dl-${{ matrix.device.profile }}-${{ needs.check_upstream.outputs.latest_hash }}-${{ hashFiles('flake.nix', 'packages.txt') }}
+        key: ${{ runner.os }}-openwrt-dl-${{ github.ref_name }}-${{ hashFiles('flake.nix', 'packages.txt') }}
         restore-keys: |
-          ${{ runner.os }}-openwrt-dl-${{ matrix.device.profile }}-
+          ${{ runner.os }}-openwrt-dl-${{ github.ref_name }}-
           ${{ runner.os }}-openwrt-dl-
 
     - name: Cache OpenWrt ccache
       uses: actions/cache@v4
       with:
         path: .ccache
-        key: ${{ runner.os }}-openwrt-ccache-${{ matrix.device.profile }}-${{ github.sha }}
+        key: ${{ runner.os }}-openwrt-ccache-${{ matrix.device.profile }}-${{ github.ref_name }}-${{ github.run_id }}
         restore-keys: |
+          ${{ runner.os }}-openwrt-ccache-${{ matrix.device.profile }}-${{ github.ref_name }}-
           ${{ runner.os }}-openwrt-ccache-${{ matrix.device.profile }}-
           ${{ runner.os }}-openwrt-ccache-
-
-    - name: Update flake.lock
-      run: nix flake update
 
     - name: Build OpenWrt Image (${{ matrix.device.name }})
       env:
         CI: "1"
-      run: nix develop --impure --command build-nss-image --profile ${{ matrix.device.profile }}
+      run: |
+        FLAGS="--profile ${{ matrix.device.profile }}"
+        
+        # Only build IB/SDK for primary (representative) devices to avoid redundancy
+        if [ "${{ matrix.device.primary }}" == "true" ]; then
+          if [ "${{ github.event_name == 'workflow_dispatch' }}" == "true" ]; then
+            if [ "${{ github.event.inputs.build_ib }}" == "true" ]; then FLAGS="$FLAGS --imagebuilder"; fi
+            if [ "${{ github.event.inputs.build_sdk }}" == "true" ]; then FLAGS="$FLAGS --sdk"; fi
+          else
+            # Default for automated runs (IB enabled by default)
+            FLAGS="$FLAGS --imagebuilder"
+          fi
+        fi
+        nix develop --impure --command build-nss-image $FLAGS
 
     - name: Collect logs on failure
       if: failure()
@@ -180,6 +226,7 @@ jobs:
         files: |
           source/bin/targets/**/*.bin
           source/bin/targets/**/*.itb
+          source/bin/targets/**/*.tar.xz
         tag_name: ${{ needs.prepare_release.outputs.release_tag }}
         name: OpenWrt NSS Build (${{ needs.prepare_release.outputs.release_tag }})
         token: ${{ secrets.RELEASE_TOKEN }}
@@ -214,13 +261,10 @@ jobs:
       with:
         ref: ${{ github.ref }}
 
-    - name: Install Nix
-      uses: cachix/install-nix-action@v25
+    - name: Download updated flake.lock
+      uses: actions/download-artifact@v4
       with:
-        nix_path: nixpkgs=channel:nixos-unstable
-
-    - name: Update flake.lock
-      run: nix flake update
+        name: flake-lock
 
     - name: Commit updated flake.lock
       run: |
