@@ -227,6 +227,7 @@ jobs:
           source/bin/targets/**/*.bin
           source/bin/targets/**/*.itb
           source/bin/targets/**/*.tar.xz
+          source/bin/targets/**/*.tar.zst
         tag_name: ${{ needs.prepare_release.outputs.release_tag }}
         name: OpenWrt NSS Build (${{ needs.prepare_release.outputs.release_tag }})
         token: ${{ secrets.RELEASE_TOKEN }}
