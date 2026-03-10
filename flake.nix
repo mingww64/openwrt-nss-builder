@@ -463,8 +463,8 @@
                     mkdir -p .feeds-mapped/routing
                     mkdir -p .feeds-mapped/nss_packages
                     mkdir -p .feeds-mapped/sqm_scripts_nss
-                    mkdir -p .feeds-mapped/luci_app_argon_config
-                    mkdir -p .feeds-mapped/luci_app_pushbot
+                    mkdir -p .feeds-mapped/luci-app-argon-config
+                    mkdir -p .feeds-mapped/luci-app-pushbot
                     mkdir -p .feeds-merged .feeds-upper .feeds-work
 
                     map_feed() {
@@ -494,8 +494,8 @@
                     map_feed ${openwrt-routing} .feeds-mapped/routing .feeds-upper/routing .feeds-work/routing .feeds-merged/routing
                     map_feed ${nss-packages} .feeds-mapped/nss_packages .feeds-upper/nss_packages .feeds-work/nss_packages .feeds-merged/nss_packages
                     map_feed ${sqm-scripts-nss} .feeds-mapped/sqm_scripts_nss .feeds-upper/sqm_scripts_nss .feeds-work/sqm_scripts_nss .feeds-merged/sqm_scripts_nss
-                    map_feed ${luci-app-argon-config} .feeds-mapped/luci_app_argon_config .feeds-upper/luci_app_argon_config .feeds-work/luci_app_argon_config .feeds-merged/luci_app_argon_config
-                    map_feed ${luci-app-pushbot} .feeds-mapped/luci_app_pushbot .feeds-upper/luci_app_pushbot .feeds-work/luci_app_pushbot .feeds-merged/luci_app_pushbot
+                    map_feed ${luci-app-argon-config} .feeds-mapped/luci-app-argon-config .feeds-upper/luci-app-argon-config .feeds-work/luci-app-argon-config .feeds-merged/luci-app-argon-config
+                    map_feed ${luci-app-pushbot} .feeds-mapped/luci-app-pushbot .feeds-upper/luci-app-pushbot .feeds-work/luci-app-pushbot .feeds-merged/luci-app-pushbot
 
                     ln -sfn $PWD/.feeds-merged/luci-theme-argon .source-lower-staging/package/luci-theme-argon
                     ln -sfn $PWD/.feeds-merged/packages .source-lower-staging/feeds/packages
@@ -503,8 +503,8 @@
                     ln -sfn $PWD/.feeds-merged/routing .source-lower-staging/feeds/routing
                     ln -sfn $PWD/.feeds-merged/nss_packages .source-lower-staging/feeds/nss_packages
                     ln -sfn $PWD/.feeds-merged/sqm_scripts_nss .source-lower-staging/feeds/sqm_scripts_nss
-                    ln -sfn $PWD/.feeds-merged/luci_app_argon_config .source-lower-staging/package/luci-app-argon-config
-                    ln -sfn $PWD/.feeds-merged/luci_app_pushbot .source-lower-staging/package/luci-app-pushbot
+                    ln -sfn $PWD/.feeds-merged/luci-app-argon-config .source-lower-staging/package/luci-app-argon-config
+                    ln -sfn $PWD/.feeds-merged/luci-app-pushbot .source-lower-staging/package/luci-app-pushbot
 
                     run_detached fuse-overlayfs -o lowerdir=.source-lower-staging:.source-mapped,upperdir=.source-upper,workdir=.source-work source
 
