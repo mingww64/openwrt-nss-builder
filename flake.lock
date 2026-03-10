@@ -16,19 +16,19 @@
         "type": "github"
       }
     },
-    "luci-app-pushbot": {
+    "luci-app-wechatpush": {
       "flake": false,
       "locked": {
-        "lastModified": 1763395564,
-        "narHash": "sha256-5amgUmNcSlb7ZutkQcjJH9euplhH3y56PHpH5lQA3ks=",
-        "owner": "zzsj0928",
-        "repo": "luci-app-pushbot",
-        "rev": "1e4034de1e3c74e1cca3f7382cc6e5806514865e",
+        "lastModified": 1772541206,
+        "narHash": "sha256-RilLyEzzfJGcyun/GEUB7P2xo3s0zZMPhdtjPMoS5EM=",
+        "owner": "tty228",
+        "repo": "luci-app-wechatpush",
+        "rev": "f0af3d39f932517dd4f92d9561fbc4c0979a5fe7",
         "type": "github"
       },
       "original": {
-        "owner": "zzsj0928",
-        "repo": "luci-app-pushbot",
+        "owner": "tty228",
+        "repo": "luci-app-wechatpush",
         "type": "github"
       }
     },
@@ -149,7 +149,7 @@
     "root": {
       "inputs": {
         "luci-app-argon-config": "luci-app-argon-config",
-        "luci-app-pushbot": "luci-app-pushbot",
+        "luci-app-wechatpush": "luci-app-wechatpush",
         "luci-theme-argon": "luci-theme-argon",
         "nixpkgs": "nixpkgs",
         "nss-packages": "nss-packages",

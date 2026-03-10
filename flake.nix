@@ -35,8 +35,8 @@
       url = "github:jerrykuku/luci-app-argon-config";
       flake = false;
     };
-    luci-app-pushbot = {
-      url = "github:zzsj0928/luci-app-pushbot";
+    luci-app-wechatpush = {
+      url = "github:tty228/luci-app-wechatpush";
       flake = false;
     };
   };
@@ -52,7 +52,7 @@
     sqm-scripts-nss,
     luci-theme-argon,
     luci-app-argon-config,
-    luci-app-pushbot,
+    luci-app-wechatpush,
   }: let
     supportedSystems = ["x86_64-linux" "aarch64-linux"];
     forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
@@ -426,7 +426,7 @@
                   # Automatically remount if flake inputs have changed.
                   # Only unmounts FUSE mounts — build artifacts in .source-upper are preserved.
                   # Run 'clean-nss-mounts' manually if you want a full clean rebuild.
-                  CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}-${luci-app-argon-config.narHash}-${luci-app-pushbot.narHash}"
+                  CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}-${luci-app-argon-config.narHash}-${luci-app-wechatpush.narHash}"
                   if [ -f .flake-inputs-hash ] && [ "$(cat .flake-inputs-hash)" != "$CURRENT_INPUTS_HASH" ]; then
                     echo "🔄 Flake inputs changed! Unmounting old mounts (build artifacts preserved)..."
                     unmount-nss-mounts
@@ -464,7 +464,7 @@
                     mkdir -p .feeds-mapped/nss_packages
                     mkdir -p .feeds-mapped/sqm_scripts_nss
                     mkdir -p .feeds-mapped/luci-app-argon-config
-                    mkdir -p .feeds-mapped/luci-app-pushbot
+                    mkdir -p .feeds-mapped/luci-app-wechatpush
                     mkdir -p .feeds-merged .feeds-upper .feeds-work
 
                     map_feed() {
@@ -495,7 +495,7 @@
                     map_feed ${nss-packages} .feeds-mapped/nss_packages .feeds-upper/nss_packages .feeds-work/nss_packages .feeds-merged/nss_packages
                     map_feed ${sqm-scripts-nss} .feeds-mapped/sqm_scripts_nss .feeds-upper/sqm_scripts_nss .feeds-work/sqm_scripts_nss .feeds-merged/sqm_scripts_nss
                     map_feed ${luci-app-argon-config} .feeds-mapped/luci-app-argon-config .feeds-upper/luci-app-argon-config .feeds-work/luci-app-argon-config .feeds-merged/luci-app-argon-config
-                    map_feed ${luci-app-pushbot} .feeds-mapped/luci-app-pushbot .feeds-upper/luci-app-pushbot .feeds-work/luci-app-pushbot .feeds-merged/luci-app-pushbot
+                    map_feed ${luci-app-wechatpush} .feeds-mapped/luci-app-wechatpush .feeds-upper/luci-app-wechatpush .feeds-work/luci-app-wechatpush .feeds-merged/luci-app-wechatpush
 
                     ln -sfn $PWD/.feeds-merged/luci-theme-argon .source-lower-staging/package/luci-theme-argon
                     ln -sfn $PWD/.feeds-merged/packages .source-lower-staging/feeds/packages
@@ -504,7 +504,7 @@
                     ln -sfn $PWD/.feeds-merged/nss_packages .source-lower-staging/feeds/nss_packages
                     ln -sfn $PWD/.feeds-merged/sqm_scripts_nss .source-lower-staging/feeds/sqm_scripts_nss
                     ln -sfn $PWD/.feeds-merged/luci-app-argon-config .source-lower-staging/package/luci-app-argon-config
-                    ln -sfn $PWD/.feeds-merged/luci-app-pushbot .source-lower-staging/package/luci-app-pushbot
+                    ln -sfn $PWD/.feeds-merged/luci-app-wechatpush .source-lower-staging/package/luci-app-wechatpush
 
                     run_detached fuse-overlayfs -o lowerdir=.source-lower-staging:.source-mapped,upperdir=.source-upper,workdir=.source-work source
 

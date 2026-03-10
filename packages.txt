@@ -20,7 +20,7 @@ luci-app-argon-config
 luci-app-pbr
 luci-app-irqbalance
 luci-proto-wireguard
-luci-app-pushbot
+luci-app-wechatpush
 speedtest-netperf
 qrencode
 sed
