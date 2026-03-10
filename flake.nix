@@ -140,6 +140,7 @@
         MENUCONFIG=0
         BUILD_IB=0
         BUILD_SDK=0
+        PRESERVE_CONFIG=0
 
         while [[ $# -gt 0 ]]; do
           case $1 in
@@ -165,6 +166,10 @@
               ;;
             --sdk)
               BUILD_SDK=1
+              shift
+              ;;
+            --preserve-config)
+              PRESERVE_CONFIG=1
               shift
               ;;
             *)
@@ -233,24 +238,25 @@
           echo "--- Feeds are up to date, skipping install ---" | tee -a "$LOGFILE"
         fi
 
-        # Build the image using the config seed
-        if [ ! -f .config ]; then
-          if [ -f nss-setup/config-nss.seed ]; then
-            cp nss-setup/config-nss.seed .config
-          elif [ -f "$FLAKE_SOURCE/nss-setup/config-nss.seed" ]; then
-            cp "$FLAKE_SOURCE/nss-setup/config-nss.seed" .config
-          fi
+        # Determine seed file path (needed for profile search regardless of PRESERVE_CONFIG)
+        SEED_FILE="nss-setup/config-nss.seed"
+        if [ ! -f "$SEED_FILE" ] && [ -f "$FLAKE_SOURCE/nss-setup/config-nss.seed" ]; then
+          SEED_FILE="$FLAKE_SOURCE/nss-setup/config-nss.seed"
         fi
 
-        # Disable all sub-targets and devices by default in .config
-        sed -i 's/^CONFIG_TARGET_qualcommax_\([a-z0-9]*\)=y/# CONFIG_TARGET_qualcommax_\1 is not set/' .config
-        sed -i 's/^CONFIG_TARGET_qualcommax_[a-z0-9]*_DEVICE_[a-zA-Z0-9_-]*=y/# & is not set/' .config
+        if [ "$PRESERVE_CONFIG" -eq 1 ] && [ -f .config ]; then
+          echo "--- Preserving existing .config ---" | tee -a "$LOGFILE"
+        else
+          # Always start from the seed so .config is in a clean, known state
+          cp "$SEED_FILE" .config
 
-        # Fuzzy search for the profile — check .config first, then fall back to the seed
-        # (needed when the seed's default subtarget differs from the target device, e.g.
-        #  seed defaults to ipq807x but the device is ipq60xx)
-        SEED_FILE="nss-setup/config-nss.seed"
-        MATCHED_PROFILES=$(grep -io "CONFIG_TARGET_qualcommax_[a-z0-9]*_DEVICE_.*$PROFILE.*" .config "$SEED_FILE" 2>/dev/null | sed 's/.*://;s/ is not set//;s/=y//;s/^# //' | sort -u || true)
+          # Disable all sub-targets and devices — the correct ones are re-enabled below
+          sed -i 's/^CONFIG_TARGET_qualcommax_\([a-z0-9]*\)=y/# CONFIG_TARGET_qualcommax_\1 is not set/' .config
+          sed -i 's/^CONFIG_TARGET_qualcommax_[a-z0-9]*_DEVICE_[a-zA-Z0-9_-]*=y/# & is not set/' .config
+        fi
+
+        # Fuzzy search for the profile in the seed (always uses seed as source of truth)
+        MATCHED_PROFILES=$(grep -io "CONFIG_TARGET_qualcommax_[a-z0-9]*_DEVICE_.*$PROFILE.*" "$SEED_FILE" 2>/dev/null | sed 's/ is not set//;s/=y//;s/^# //' | sort -u || true)
 
         if [ -z "$MATCHED_PROFILES" ]; then
           echo "❌ Error: Profile '$PROFILE' not found in config-nss.seed" | tee -a "$LOGFILE"
@@ -309,8 +315,6 @@
         fi
 
         # Enable the matched subtarget and device
-        # First, unset any previously active subtarget (e.g. seed default of ipq807x)
-        sed -i 's/^CONFIG_TARGET_qualcommax_[a-z0-9]*=y/# & is not set/' .config
         echo "CONFIG_TARGET_qualcommax_$SUBTARGET=y" >> .config.fragment
         echo "$MATCHED_PROFILE=y" >> .config.fragment
 
