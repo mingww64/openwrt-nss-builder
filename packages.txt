@@ -1,4 +1,5 @@
 luci
+luci-compat
 luci-app-acme
 luci-app-dawn
 luci-app-ddns
@@ -31,3 +32,4 @@ block-mount
 zram-swap
 kmod-fs-exfat
 kmod-tls
+kmod-tcp-bbr
