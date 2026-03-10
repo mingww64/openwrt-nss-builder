@@ -23,6 +23,8 @@ luci-proto-wireguard
 luci-app-pushbot
 speedtest-netperf
 qrencode
+sed
+grep
 coreutils-sort
 mdns-repeater
 socat
@@ -33,3 +35,4 @@ zram-swap
 kmod-fs-exfat
 kmod-tls
 kmod-tcp-bbr
+dnsmasq-full
