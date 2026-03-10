@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   check_upstream:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
       latest_hash: ${{ steps.check.outputs.latest_hash }}
@@ -96,7 +96,6 @@ jobs:
         with:
           tag_name: ${{ steps.release_tag.outputs.value }}
           name: OpenWrt NSS Build (${{ steps.release_tag.outputs.value }})
-          token: ${{ secrets.RELEASE_TOKEN }}
           prerelease: true
           draft: true
           body: |
@@ -136,9 +135,6 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: flake-lock
-
-    - name: Update tzdata
-      run: sudo apt-get update && sudo apt-get install -y tzdata fuse3
 
     - name: Enable /dev/fuse
       run: |
@@ -230,8 +226,6 @@ jobs:
           source/bin/targets/**/*.tar.zst
         tag_name: ${{ needs.prepare_release.outputs.release_tag }}
         name: OpenWrt NSS Build (${{ needs.prepare_release.outputs.release_tag }})
-        token: ${{ secrets.RELEASE_TOKEN }}
-        prerelease: true
         draft: true
         append_body: true
         body: |
@@ -246,17 +240,14 @@ jobs:
         uses: softprops/action-gh-release@v2.4.2
         with:
           tag_name: ${{ needs.prepare_release.outputs.release_tag }}
-          token: ${{ secrets.RELEASE_TOKEN }}
           draft: false
-          prerelease: true
+          prerelease: false
           make_latest: true
 
   post_build:
     needs: [check_upstream, build]
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
     - uses: actions/checkout@v4
       with:
