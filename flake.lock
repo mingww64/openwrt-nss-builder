@@ -157,7 +157,8 @@
         "openwrt-packages": "openwrt-packages",
         "openwrt-routing": "openwrt-routing",
         "openwrt-source": "openwrt-source",
-        "sqm-scripts-nss": "sqm-scripts-nss"
+        "sqm-scripts-nss": "sqm-scripts-nss",
+        "wrtbwmon": "wrtbwmon"
       }
     },
     "sqm-scripts-nss": {
@@ -173,6 +174,22 @@
       "original": {
         "owner": "qosmio",
         "repo": "sqm-scripts-nss",
+        "type": "github"
+      }
+    },
+    "wrtbwmon": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1606876717,
+        "narHash": "sha256-mWDgaWlcopSFvXcJqfavrWqPLpyYSUm9o7jUexyT7eY=",
+        "owner": "brvphoenix",
+        "repo": "wrtbwmon",
+        "rev": "f82f9b393842d2113c3253a4902af50bfc757e1a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "brvphoenix",
+        "repo": "wrtbwmon",
         "type": "github"
       }
     }

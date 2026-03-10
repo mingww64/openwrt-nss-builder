@@ -1,0 +1,18 @@
+--- /dev/null
++++ b/tools/gmp/patches/050-fix-tmp-alloc.patch
+@@ -0,0 +1,15 @@
++--- a/gmp-impl.h
+++++ b/gmp-impl.h
++@@ -168,6 +168,12 @@
++ 
++ #endif /* __GMP_WITHIN_GMP */
++ 
+++#if !defined(WANT_TMP_ALLOCA) && !defined(WANT_TMP_REENTRANT) && !defined(WANT_TMP_NOTREENTRANT)
+++#ifdef HAVE_ALLOCA
+++#define WANT_TMP_ALLOCA 1
+++#endif
+++#endif
+++
++ #ifndef WANT_TMP_DEBUG  /* for TMP_ALLOC_LIMBS_2 and others */
++ #define WANT_TMP_DEBUG 0
++ #endif

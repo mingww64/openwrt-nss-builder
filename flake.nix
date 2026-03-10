@@ -39,6 +39,10 @@
       url = "github:tty228/luci-app-wechatpush";
       flake = false;
     };
+    wrtbwmon = {
+      url = "github:brvphoenix/wrtbwmon";
+      flake = false;
+    };
   };
 
   outputs = {
@@ -53,6 +57,7 @@
     luci-theme-argon,
     luci-app-argon-config,
     luci-app-wechatpush,
+    wrtbwmon,
   }: let
     supportedSystems = ["x86_64-linux" "aarch64-linux"];
     forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
@@ -127,9 +132,7 @@
 
       buildScript = pkgs.writeShellScriptBin "build-nss-image" ''
         set -e
-        if [ -n "$CI" ] && [ "$CI" -eq 1 ]; then
-          set -o pipefail
-        fi
+        set -o pipefail
 
         PROFILE="linksys_mr7350"
         SYNC_PACKAGES=0
@@ -243,8 +246,11 @@
         sed -i 's/^CONFIG_TARGET_qualcommax_\([a-z0-9]*\)=y/# CONFIG_TARGET_qualcommax_\1 is not set/' .config
         sed -i 's/^CONFIG_TARGET_qualcommax_[a-z0-9]*_DEVICE_[a-zA-Z0-9_-]*=y/# & is not set/' .config
 
-        # Fuzzy search for the profile
-        MATCHED_PROFILES=$(grep -io "CONFIG_TARGET_qualcommax_[a-z0-9]*_DEVICE_.*$PROFILE.*" .config | sed 's/ is not set//' | sed 's/=y//' | sed 's/^# //' | sort -u || true)
+        # Fuzzy search for the profile — check .config first, then fall back to the seed
+        # (needed when the seed's default subtarget differs from the target device, e.g.
+        #  seed defaults to ipq807x but the device is ipq60xx)
+        SEED_FILE="nss-setup/config-nss.seed"
+        MATCHED_PROFILES=$(grep -io "CONFIG_TARGET_qualcommax_[a-z0-9]*_DEVICE_.*$PROFILE.*" .config "$SEED_FILE" 2>/dev/null | sed 's/.*://;s/ is not set//;s/=y//;s/^# //' | sort -u || true)
 
         if [ -z "$MATCHED_PROFILES" ]; then
           echo "❌ Error: Profile '$PROFILE' not found in config-nss.seed" | tee -a "$LOGFILE"
@@ -303,6 +309,8 @@
         fi
 
         # Enable the matched subtarget and device
+        # First, unset any previously active subtarget (e.g. seed default of ipq807x)
+        sed -i 's/^CONFIG_TARGET_qualcommax_[a-z0-9]*=y/# & is not set/' .config
         echo "CONFIG_TARGET_qualcommax_$SUBTARGET=y" >> .config.fragment
         echo "$MATCHED_PROFILE=y" >> .config.fragment
 
@@ -426,7 +434,7 @@
                   # Automatically remount if flake inputs have changed.
                   # Only unmounts FUSE mounts — build artifacts in .source-upper are preserved.
                   # Run 'clean-nss-mounts' manually if you want a full clean rebuild.
-                  CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}-${luci-app-argon-config.narHash}-${luci-app-wechatpush.narHash}"
+                  CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}-${luci-app-argon-config.narHash}-${luci-app-wechatpush.narHash}-${wrtbwmon.narHash}"
                   if [ -f .flake-inputs-hash ] && [ "$(cat .flake-inputs-hash)" != "$CURRENT_INPUTS_HASH" ]; then
                     echo "🔄 Flake inputs changed! Unmounting old mounts (build artifacts preserved)..."
                     unmount-nss-mounts
@@ -465,6 +473,7 @@
                     mkdir -p .feeds-mapped/sqm_scripts_nss
                     mkdir -p .feeds-mapped/luci-app-argon-config
                     mkdir -p .feeds-mapped/luci-app-wechatpush
+                    mkdir -p .feeds-mapped/wrtbwmon
                     mkdir -p .feeds-merged .feeds-upper .feeds-work
 
                     map_feed() {
@@ -496,6 +505,7 @@
                     map_feed ${sqm-scripts-nss} .feeds-mapped/sqm_scripts_nss .feeds-upper/sqm_scripts_nss .feeds-work/sqm_scripts_nss .feeds-merged/sqm_scripts_nss
                     map_feed ${luci-app-argon-config} .feeds-mapped/luci-app-argon-config .feeds-upper/luci-app-argon-config .feeds-work/luci-app-argon-config .feeds-merged/luci-app-argon-config
                     map_feed ${luci-app-wechatpush} .feeds-mapped/luci-app-wechatpush .feeds-upper/luci-app-wechatpush .feeds-work/luci-app-wechatpush .feeds-merged/luci-app-wechatpush
+                    map_feed ${wrtbwmon} .feeds-mapped/wrtbwmon .feeds-upper/wrtbwmon .feeds-work/wrtbwmon .feeds-merged/wrtbwmon
 
                     ln -sfn $PWD/.feeds-merged/luci-theme-argon .source-lower-staging/package/luci-theme-argon
                     ln -sfn $PWD/.feeds-merged/packages .source-lower-staging/feeds/packages
@@ -505,6 +515,7 @@
                     ln -sfn $PWD/.feeds-merged/sqm_scripts_nss .source-lower-staging/feeds/sqm_scripts_nss
                     ln -sfn $PWD/.feeds-merged/luci-app-argon-config .source-lower-staging/package/luci-app-argon-config
                     ln -sfn $PWD/.feeds-merged/luci-app-wechatpush .source-lower-staging/package/luci-app-wechatpush
+                    ln -sfn $PWD/.feeds-merged/wrtbwmon .source-lower-staging/package/wrtbwmon
 
                     run_detached fuse-overlayfs -o lowerdir=.source-lower-staging:.source-mapped,upperdir=.source-upper,workdir=.source-work source
 

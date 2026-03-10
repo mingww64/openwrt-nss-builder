@@ -21,6 +21,7 @@ luci-app-pbr
 luci-app-irqbalance
 luci-proto-wireguard
 luci-app-wechatpush
+wrtbwmon
 speedtest-netperf
 qrencode
 sed
