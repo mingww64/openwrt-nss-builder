@@ -1,0 +1,20 @@
+#!/bin/sh
+
+# Only run for WAN interface and when it's coming UP
+[ "$INTERFACE" = "wan" ] || exit 0
+[ "$ACTION" = "ifup" ] || exit 0
+
+logger -t nlbwmon-fix "Detected $INTERFACE $ACTION - applying nf_conntrack_netlink reload work-around"
+
+# Stop nlbwmon
+/etc/init.d/nlbwmon stop
+
+# Reload the netlink module
+# We use -f to force if needed, but normally rmmod/modprobe is enough
+rmmod nf_conntrack_netlink
+modprobe nf_conntrack_netlink
+
+# Restart nlbwmon
+/etc/init.d/nlbwmon start
+
+logger -t nlbwmon-fix "Work-around applied successfully"
