@@ -105,11 +105,57 @@
         rm -rf "$PWD/.source-upper" "$PWD/.source-work" "$PWD/.source-mapped" "$PWD/.source-lower-staging" "$PWD/.feeds-mapped" "$PWD/.feeds-merged" "$PWD/.feeds-upper" "$PWD/.feeds-work" "$PWD/source"
         echo "Done. You can now run 'nix flake update' and 'nix develop' to rebuild the environment."
       '';
+
+    # Shared helper — checks for local modifications in upper layers that shadow/override upstream flake updates.
+    makeShadowCheckScript = pkgs:
+      pkgs.writeShellScriptBin "check-shadowed-source" ''
+        export PATH="${pkgs.coreutils}/bin:${pkgs.findutils}/bin:${pkgs.gnused}/bin:$PATH"
+        echo "⚠️  Checking for shadowed source files (local modifications that override upstream updates)..."
+
+        check_dir() {
+          local upper="$1"
+          local lower="$2"
+          local label="$3"
+
+          if [ -d "$upper" ]; then
+            local shadowed=""
+            while IFS= read -r f; do
+              local rel_path="''${f#$upper/}"
+              if [ -e "$lower/$rel_path" ]; then
+                shadowed="$shadowed\n      - $rel_path"
+              fi
+            done < <(find "$upper" -type f -not -path "*/build_dir/*" -not -path "*/staging_dir/*" -not -path "*/bin/*" -not -path "*/tmp/*" -not -path "*/logs/*" -not -path "*/.git/*" -not -name "*.o" 2>/dev/null)
+
+            if [ -n "$shadowed" ]; then
+              echo "  - [$label] has local modifications shadowing upstream:"
+              echo -e "$shadowed" | sed '/^$/d' | head -n 10
+              local count=$(echo -e "$shadowed" | sed '/^$/d' | wc -l)
+              if [ "$count" -gt 10 ]; then
+                echo "      ...and $((count - 10)) more"
+              fi
+            fi
+          fi
+        }
+
+        check_dir ".source-upper" "${openwrt-source}" "Main Source"
+        check_dir ".feeds-upper/luci-theme-argon" "${luci-theme-argon}" "Feed: luci-theme-argon"
+        check_dir ".feeds-upper/packages" "${openwrt-packages}" "Feed: packages"
+        check_dir ".feeds-upper/luci" "${openwrt-luci}" "Feed: luci"
+        check_dir ".feeds-upper/routing" "${openwrt-routing}" "Feed: routing"
+        check_dir ".feeds-upper/nss_packages" "${nss-packages}" "Feed: nss_packages"
+        check_dir ".feeds-upper/sqm_scripts_nss" "${sqm-scripts-nss}" "Feed: sqm_scripts_nss"
+        check_dir ".feeds-upper/luci-app-argon-config" "${luci-app-argon-config}" "Feed: luci-app-argon-config"
+        check_dir ".feeds-upper/luci-app-wechatpush" "${luci-app-wechatpush}" "Feed: luci-app-wechatpush"
+        check_dir ".feeds-upper/wrtbwmon" "${wrtbwmon}" "Feed: wrtbwmon"
+
+        echo "-------------------------------------------------------------------------------"
+      '';
   in {
     apps = forAllSystems (system: let
       pkgs = nixpkgsFor.${system};
       cleanMountsScript = makeCleanMountsScript pkgs;
       unmountScript = makeUnmountScript pkgs;
+      shadowCheckScript = makeShadowCheckScript pkgs;
     in {
       clean-nss-mounts = {
         type = "app";
@@ -118,6 +164,10 @@
       unmount-nss-mounts = {
         type = "app";
         program = "${unmountScript}/bin/unmount-nss-mounts";
+      };
+      check-shadowed-source = {
+        type = "app";
+        program = "${shadowCheckScript}/bin/check-shadowed-source";
       };
     });
 
@@ -129,6 +179,7 @@
 
       cleanMountsScript = makeCleanMountsScript pkgs;
       unmountScript = makeUnmountScript pkgs;
+      shadowCheckScript = makeShadowCheckScript pkgs;
 
       buildScript = pkgs.writeShellScriptBin "build-nss-image" ''
         set -e
@@ -239,8 +290,6 @@
 
           ./scripts/feeds update && ./scripts/feeds install -a 2>&1 | tee -a "$LOGFILE"
 
-          # Disable Python PGO to prevent test failures during host build
-          sed -i 's/--enable-optimizations//g' feeds/packages/lang/python/python3/Makefile
 
           rm -f .feeds_need_update
         else
@@ -412,6 +461,7 @@
         buildScript
         cleanMountsScript
         unmountScript
+        shadowCheckScript
         ncurses
         pkg-config
         quilt
@@ -457,13 +507,79 @@
                   export PATH="$PWD/.nix-host-wrappers:$PATH"
                   # ---------------------------------------------
 
+                  # Pre-populate staging_dir/host with Nix tools so OpenWrt skips rebuilding them.
+                  # OpenWrt checks for stamp files in staging_dir/host/stamp/ to determine
+                  # whether a tool needs to be compiled. By symlinking Nix binaries and
+                  # touching the stamps, we skip heavy compile steps for cmake, ninja, etc.
+                  STAGING_HOST="source/staging_dir/host"
+                  if [ -d source ]; then
+                    mkdir -p "$STAGING_HOST/bin" "$STAGING_HOST/stamp"
+
+                    # Helper: symlink a Nix binary into staging_dir/host/bin and touch its stamp
+                    seed_host_tool() {
+                      local stamp_name="$1"; shift
+                      for tool in "$@"; do
+                        local bin
+                        bin="$(command -v "$tool" 2>/dev/null || true)"
+                        if [ -n "$bin" ]; then
+                          ln -sf "$bin" "$STAGING_HOST/bin/$tool" 2>/dev/null || true
+                        fi
+                      done
+                      touch "$STAGING_HOST/stamp/.$stamp_name"_installed 2>/dev/null || true
+                    }
+
+                    seed_host_tool ninja    ninja
+                    seed_host_tool m4       m4
+                    seed_host_tool xz       xz xzcat unxz lzma
+                    seed_host_tool zstd     zstd zstdcat unzstd zstdmt
+
+                    echo "✅ Staged Nix host tools into $STAGING_HOST"
+                  fi
+
+                  if [ -d "patches" ]; then
+                    PATCH_DIR="patches"
+                  elif [ -d "${self}/patches" ]; then
+                    PATCH_DIR="${self}/patches"
+                  else
+                    PATCH_DIR=""
+                  fi
+
                   # Automatically remount if flake inputs have changed.
                   # Only unmounts FUSE mounts — build artifacts in .source-upper are preserved.
                   # Run 'clean-nss-mounts' manually if you want a full clean rebuild.
                   CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}-${luci-app-argon-config.narHash}-${luci-app-wechatpush.narHash}-${wrtbwmon.narHash}"
+                  INPUTS_CHANGED=0
                   if [ -f .flake-inputs-hash ] && [ "$(cat .flake-inputs-hash)" != "$CURRENT_INPUTS_HASH" ]; then
                     echo "🔄 Flake inputs changed! Unmounting old mounts (build artifacts preserved)..."
                     unmount-nss-mounts
+                    INPUTS_CHANGED=1
+                  fi
+
+                  # Only clean upper-layer patch artifacts when source is NOT yet mounted.
+                  # Modifying .source-upper/ while the FUSE overlay is live causes cache
+                  # desync — the overlay keeps serving stale inodes, making patch reads fail.
+                  if ! mountpoint -q source && [ -n "$PATCH_DIR" ]; then
+                    for patch in "$PATCH_DIR"/*.patch; do
+                      [ -f "$patch" ] || continue
+                      awk '/^\+\+\+ / {sub(/^[ab]\//, "", $2); print $2}' "$patch" | while read -r pf; do
+                        if [ -n "$pf" ]; then
+                          if [[ "$pf" == feeds/* ]]; then
+                            feed_name=$(echo "$pf" | cut -d/ -f2)
+                            feed_rel_path=$(echo "$pf" | cut -d/ -f3-)
+                            if [ -e ".feeds-upper/$feed_name/$feed_rel_path" ]; then
+                              rm -f ".feeds-upper/$feed_name/$feed_rel_path"
+                            fi
+                          elif [ -e ".source-upper/$pf" ]; then
+                            rm -f ".source-upper/$pf"
+                          fi
+                        fi
+                      done
+                    done
+                  fi
+
+                  # Report shadowed files only after patches have been cleaned (to reduce noise)
+                  if [ "$INPUTS_CHANGED" = "1" ]; then
+                    check-shadowed-source
                   fi
                   echo "$CURRENT_INPUTS_HASH" > .flake-inputs-hash
 
@@ -580,31 +696,48 @@
                     ln -s "$PWD/.ccache" "$PWD/source/.ccache"
                   fi
 
-                  # Apply custom patches
+                  # Apply custom patches uniformly
                   if [ -d "patches" ]; then
-                    echo "Applying patches from local directory..."
                     PATCH_DIR="patches"
                   elif [ -d "$FLAKE_SOURCE/patches" ]; then
-                    echo "Applying patches from flake source..."
                     PATCH_DIR="$FLAKE_SOURCE/patches"
                   else
                     PATCH_DIR=""
                   fi
 
                   if [ -n "$PATCH_DIR" ]; then
+                    echo "--- Applying Unified Patches ---"
                     # For patches that modify the build system (Makefiles, Config.in, etc), apply them at root
                     for patch in "$PATCH_DIR"/*.patch; do
                       if [ -f "$patch" ]; then
-                        if patch -d source -R -p1 -s -f --dry-run < "$patch" >/dev/null 2>&1; then
-                          echo "✅ Patch $(basename $patch) already applied."
-                        else
-                          echo "🔧 Applying patch $(basename $patch)..."
-                          if patch -d source -p1 < "$patch"; then
-                            echo "✅ Applied $(basename $patch)"
+                        echo "🔧 Applying patch $(basename $patch)..."
+
+                        # Determine if patch targets a feed
+                        ft=$(awk '/^\+\+\+ / {sub(/^[ab]\//, "", $2); print $2}' "$patch" | grep -m1 '^feeds/' | cut -d/ -f2 || true)
+
+                        if [ -n "$ft" ]; then
+                          # Apply directly into the resolved feed mount path to bypass symlink limits
+                          _stripped_patch=$(cat "$patch" | sed "s|a/feeds/$ft/|a/|g; s|b/feeds/$ft/|b/|g")
+                          if echo "$_stripped_patch" | patch -d ".feeds-merged/$ft" -p1 --forward > /dev/null 2>&1; then
+                            echo "  ✅ Applied (Feed: $ft)"
                           else
-                            echo "❌ Failed to apply $(basename $patch)"
-                            if [ "$CI" = "1" ]; then exit 1; fi
-                            echo "Continuing anyway so you can run cleanup scripts"
+                            if echo "$_stripped_patch" | patch -d ".feeds-merged/$ft" -p1 --dry-run --reverse --force > /dev/null 2>&1; then
+                              echo "  -- Already applied (Feed: $ft)"
+                            else
+                              echo "  ❌ Failed to apply (Feed: $ft)"
+                              if [ "${CI:-0}" = "1" ]; then exit 1; fi
+                            fi
+                          fi
+                        else
+                          if patch -d source -p1 --forward < "$patch" > /dev/null 2>&1; then
+                            echo "  ✅ Applied"
+                          else
+                            if patch -d source -p1 --dry-run --reverse --force < "$patch" > /dev/null 2>&1; then
+                              echo "  -- Already applied"
+                            else
+                              echo "  ❌ Failed to apply"
+                              if [ "${CI:-0}" = "1" ]; then exit 1; fi
+                            fi
                           fi
                         fi
                       fi
@@ -618,18 +751,29 @@
                     fi
                   fi
 
-                  # Temporary fix for command_all.sh I/O error in GitHub Actions
-                  # The script iterates over all PATH entries, which in Nix environment is huge and may contain problematic paths
-                  # We replace it with a simpler version that returns the command path without iterating manually
-                  # This avoids the "command: command: I/O error" when hitting problematic directories in PATH
-                  echo "Patching scripts/command_all.sh to avoid I/O errors..."
-                  cat > source/scripts/command_all.sh <<'EOF'
+                  # Sync custom rootfs files overlay into OpenWrt source
+                  if [ -d "files" ]; then
+                    echo "Copying custom rootfs files from local directory..."
+                    rsync -a --no-perms "files/" source/files/
+                  elif [ -d "${self}/files" ]; then
+                    echo "Copying custom rootfs files from flake source..."
+                    rsync -a --no-perms "${self}/files/" source/files/
+                  fi
+
+                  if [ "$CI" = "1" ]; then
+                    # Temporary fix for command_all.sh I/O error in GitHub Actions
+                    # The script iterates over all PATH entries, which in Nix environment is huge and may contain problematic paths
+                    # We replace it with a simpler version that returns the command path without iterating manually
+                    # This avoids the "command: command: I/O error" when hitting problematic directories in PATH
+                    echo "Patching scripts/command_all.sh to avoid I/O errors..."
+                    cat > source/scripts/command_all.sh <<'EOF'
         #!/bin/sh
         # Replaced by flake.nix shellHook to avoid I/O errors in long Nix paths
         # Just return the first found command, as we provided the correct env via Nix
         command -v "$@"
         EOF
-                  chmod +x source/scripts/command_all.sh
+                    chmod +x source/scripts/command_all.sh
+                  fi
 
                   # Generate new feeds.conf.default using src-link to our COW merged directories
                   cat > source/feeds.conf.default.new <<EOF
