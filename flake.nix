@@ -614,7 +614,7 @@
                     # This handles structure like patches/package/utils/util-linux/patches/100-...
                     if [ -d "$PATCH_DIR/package" ]; then
                       echo "Copying package patches..."
-                      rsync -a --no-perms --chmod=u+rwX "$PATCH_DIR/package/" source/package/
+                      rsync -a --no-perms "$PATCH_DIR/package/" source/package/
                     fi
                   fi
 
