@@ -7,6 +7,10 @@ on:
     branches: [ "master", "main" ]
   workflow_dispatch:
     inputs:
+      custom_profile:
+        description: 'Custom build target profile (e.g. xiaomi_ax9000)'
+        required: false
+        type: string
       build_ib:
         description: 'Build ImageBuilder'
         required: false
@@ -17,6 +21,10 @@ on:
         required: false
         type: boolean
         default: false
+      make_args:
+        description: 'Extra arguments to pass to make (e.g. V=w or "none" for quiet)'
+        required: false
+        type: string
   schedule:
     - cron: '0 */6 * * *'  # Check for updates every 6 hours
  
@@ -31,8 +39,9 @@ jobs:
       should_build: ${{ steps.check.outputs.should_build }}
       latest_hash: ${{ steps.check.outputs.latest_hash }}
       short_hash: ${{ steps.check.outputs.short_hash }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - name: Check Upstream
         id: check
@@ -63,6 +72,39 @@ jobs:
             echo "should_build=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Determine Matrix
+        id: set-matrix
+        run: |
+          if [ -n "${{ inputs.custom_profile }}" ]; then
+            JSON='{
+              "device": [
+                {
+                  "profile": "${{ inputs.custom_profile }}",
+                  "primary": true,
+                  "name": "${{ inputs.custom_profile }}"
+                }
+              ]
+            }'
+          else
+            JSON='{
+              "device": [
+                { "profile": "linksys_mr7350",     "primary": true,  "name": "Linksys MR7350" },
+                { "profile": "linksys_mr7500",     "primary": false, "name": "Linksys MR7500" },
+                { "profile": "glinet_gl-ax1800",   "primary": false, "name": "GL.iNet GL-AX1800" },
+                { "profile": "glinet_gl-axt1800",  "primary": false, "name": "GL.iNet GL-AXT1800" },
+                { "profile": "linksys_mx4200v2",   "primary": true,  "name": "Linksys MX4200 v2" },
+                { "profile": "linksys_mx4300",     "primary": false, "name": "Linksys MX4300" },
+                { "profile": "netgear_wax620",     "primary": false, "name": "Netgear WAX620" },
+                { "profile": "dynalink_dl-wrx36",  "primary": false, "name": "Dynalink DL-WRX36" },
+                { "profile": "zyxel_nbg7815",      "primary": false, "name": "Zyxel NBG7815" },
+                { "profile": "xiaomi_ax3600",      "primary": false, "name": "Xiaomi AX3600" }
+              ]
+            }'
+          fi
+          echo "matrix<<EOF" >> $GITHUB_OUTPUT
+          echo "$JSON" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
   prepare_release:
     needs: check_upstream
     if: ${{ needs.check_upstream.outputs.should_build == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' }}
@@ -80,13 +122,13 @@ jobs:
             SHORT="${GITHUB_SHA:0:8}"
           fi
           echo "value=nss-$SHORT" >> $GITHUB_OUTPUT
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install Nix
         uses: cachix/install-nix-action@v25
       - name: Pre-update flake.lock
         run: nix flake update
       - name: Upload flake.lock
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: flake-lock
           path: flake.lock
@@ -111,20 +153,9 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
-      matrix:
-        device:
-          - { profile: linksys_mr7350,     primary: true,  name: "Linksys MR7350"       } # ipq60xx
-          - { profile: linksys_mr7500,     primary: false, name: "Linksys MR7500"       } # ipq60xx
-          - { profile: glinet_gl-ax1800,   primary: false, name: "GL.iNet GL-AX1800"    } # ipq60xx
-          - { profile: glinet_gl-axt1800,  primary: false, name: "GL.iNet GL-AXT1800"   } # ipq60xx
-          - { profile: linksys_mx4200v2,   primary: true,  name: "Linksys MX4200 v2"    } # ipq807x
-          - { profile: linksys_mx4300,     primary: false, name: "Linksys MX4300"       } # ipq807x
-          - { profile: netgear_wax620,     primary: false, name: "Netgear WAX620"       } # ipq807x
-          - { profile: dynalink_dl-wrx36,  primary: false, name: "Dynalink DL-WRX36"    } # ipq807x
-          - { profile: zyxel_nbg7815,      primary: false, name: "Zyxel NBG7815"        } # ipq807x
-          - { profile: xiaomi_ax3600,      primary: false, name: "Xiaomi AX3600"        } # ipq807x
+      matrix: ${{ fromJson(needs.check_upstream.outputs.matrix) }}
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Free Disk Space
       run: |
@@ -132,12 +163,13 @@ jobs:
         df -h
 
     - name: Download flake.lock
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: flake-lock
 
     - name: Enable /dev/fuse
       run: |
+        sudo apt-get update && sudo apt-get install -y fuse3 || true
         sudo modprobe fuse || true
         sudo chmod 666 /dev/fuse
         sudo chown root:$(id -gn) /dev/fuse
@@ -151,7 +183,7 @@ jobs:
       uses: DeterminateSystems/magic-nix-cache-action@main
 
     - name: Cache OpenWrt dl directory
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: dl
         key: ${{ runner.os }}-openwrt-dl-${{ github.ref_name }}-${{ hashFiles('flake.nix', 'packages.txt') }}
@@ -160,7 +192,7 @@ jobs:
           ${{ runner.os }}-openwrt-dl-
 
     - name: Cache OpenWrt ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: .ccache
         key: ${{ runner.os }}-openwrt-ccache-${{ matrix.device.profile }}-${{ github.ref_name }}-${{ github.run_id }}
@@ -172,6 +204,7 @@ jobs:
     - name: Build OpenWrt Image (${{ matrix.device.name }})
       env:
         CI: "1"
+        MAKE_ARGS: ${{ github.event.inputs.make_args }}
       run: |
         FLAGS="--profile ${{ matrix.device.profile }}"
         
@@ -185,7 +218,12 @@ jobs:
             FLAGS="$FLAGS --imagebuilder"
           fi
         fi
-        nix develop --impure --command build-nss-image $FLAGS
+        
+        if [ -n "$MAKE_ARGS" ]; then
+          FLAGS="$FLAGS --make-args \"$MAKE_ARGS\""
+        fi
+
+        eval nix develop --impure --command build-nss-image $FLAGS
 
     - name: Collect logs on failure
       if: failure()
@@ -198,7 +236,7 @@ jobs:
 
     - name: Upload logs on failure
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build-logs-${{ matrix.device.profile }}
         path: /tmp/build-logs/
@@ -206,10 +244,12 @@ jobs:
 
     - name: Setup SSH Session
       if: failure()
-      uses: Warpbuilds/action-debugger@v1.3
+      uses: owenthereal/action-upterm@v1
+      with: 
+        wait-timeout-minutes: 5
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: openwrt-${{ matrix.device.profile }}
         path: source/bin/
@@ -249,12 +289,12 @@ jobs:
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         ref: ${{ github.ref }}
 
     - name: Download updated flake.lock
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: flake-lock
 

@@ -141,6 +141,7 @@
         BUILD_IB=0
         BUILD_SDK=0
         PRESERVE_CONFIG=0
+        EXTRA_MAKE_ARGS="V=s"
 
         while [[ $# -gt 0 ]]; do
           case $1 in
@@ -172,12 +173,20 @@
               PRESERVE_CONFIG=1
               shift
               ;;
+            --make-args)
+              EXTRA_MAKE_ARGS="$2"
+              shift 2
+              ;;
             *)
               echo "Unknown option: $1"
               exit 1
               ;;
           esac
         done
+
+        if [ "$EXTRA_MAKE_ARGS" = "none" ]; then
+          EXTRA_MAKE_ARGS=""
+        fi
 
         EXTRA_PACKAGES=""
         if [ -f ./packages.txt ]; then
@@ -210,7 +219,7 @@
 
         if [ "$MAKE_ONLY" -eq 1 ]; then
            echo "--- Starting image build (Make only) ---" | tee -a "$LOGFILE"
-           make -j$(nproc) V=s 2>&1 | tee -a "$LOGFILE" || {
+           make -j$(nproc) $EXTRA_MAKE_ARGS 2>&1 | tee -a "$LOGFILE" || {
              echo "Build failed. Check $LOGFILE for details" | tee -a "$LOGFILE"
              exit 1
            }
@@ -362,13 +371,13 @@
           done
         fi
 
-        make defconfig V=s 2>&1 | tee -a "$LOGFILE"
+        make defconfig $EXTRA_MAKE_ARGS 2>&1 | tee -a "$LOGFILE"
 
         echo "--- Downloading sources ---" | tee -a "$LOGFILE"
-        make download -j$(nproc) V=s 2>&1 | tee -a "$LOGFILE"
+        make download -j$(nproc) $EXTRA_MAKE_ARGS 2>&1 | tee -a "$LOGFILE"
 
         echo "--- Starting image build ---" | tee -a "$LOGFILE"
-        make -j$(nproc) V=s 2>&1 | tee -a "$LOGFILE" || {
+        make -j$(nproc) $EXTRA_MAKE_ARGS 2>&1 | tee -a "$LOGFILE" || {
           echo "Build failed. Check $LOGFILE for details" | tee -a "$LOGFILE"
           exit 1
         }
@@ -427,8 +436,21 @@
                   mkdir -p .nix-host-wrappers
 
                   for tool in gcc g++ cpp as ar ld nm ranlib strip objdump; do
-                    if WRAPPED_TOOL=$(command -v "$tool"); then
-                      ln -sf "$WRAPPED_TOOL" ".nix-host-wrappers/$TRIPLET-$tool"
+                    if [ -x "$(command -v $tool)" ]; then
+                      ln -sf "$(command -v $tool)" ".nix-host-wrappers/$TRIPLET-$tool"
+                    fi
+                  done
+
+                  # Ensure native setuid FUSE wrappers are preferred over nixpkgs ones
+                  for f in fusermount fusermount3; do
+                    if [ -e "/run/wrappers/bin/$f" ]; then
+                      ln -sf "/run/wrappers/bin/$f" ".nix-host-wrappers/$f"
+                    elif [ -x "$(command -v $f 2>/dev/null)" ]; then
+                      ln -sf "$(command -v $f)" ".nix-host-wrappers/$f"
+                    elif [ -e "/usr/bin/$f" ]; then
+                      ln -sf "/usr/bin/$f" ".nix-host-wrappers/$f"
+                    elif [ -e "/bin/$f" ]; then
+                      ln -sf "/bin/$f" ".nix-host-wrappers/$f"
                     fi
                   done
 
@@ -488,16 +510,23 @@
                       local merged=$5
                       if ! mountpoint -q "$mapped"; then
                         run_detached bindfs --no-allow-other -u $(id -u) -g $(id -g) -p a-w,u+w "$src" "$mapped"
-                      fi
-                      mkdir -p "$upper" "$work" "$merged"
-                      if ! mountpoint -q "$merged"; then
                         # Wait for bindfs to be ready
                         local retries=10
                         while [ $retries -gt 0 ] && ! mountpoint -q "$mapped"; do
                           sleep 0.2
                           retries=$((retries - 1))
                         done
+                      fi
+                      mkdir -p "$upper" "$work" "$merged"
+                      # Mount the local checkout over the standard tree
+                      if ! mountpoint -q "$merged"; then
                         run_detached fuse-overlayfs -o lowerdir="$mapped",upperdir="$upper",workdir="$work" "$merged"
+                        # Wait for merge mount
+                        local retries=10
+                        while [ $retries -gt 0 ] && ! mountpoint -q "$merged"; do
+                          sleep 0.2
+                          retries=$((retries - 1))
+                        done
                       fi
                     }
 
@@ -521,9 +550,10 @@
                     ln -sfn $PWD/.feeds-merged/luci-app-wechatpush .source-lower-staging/package/luci-app-wechatpush
                     ln -sfn $PWD/.feeds-merged/wrtbwmon .source-lower-staging/package/wrtbwmon
 
+                    # Final read-write source merge
                     run_detached fuse-overlayfs -o lowerdir=.source-lower-staging:.source-mapped,upperdir=.source-upper,workdir=.source-work source
 
-                    # Wait for mounts to be ready
+                    # Wait for all background mount jobs to complete
                     sleep 1
                   fi
 
@@ -533,7 +563,7 @@
                   # which apk rejects as invalid. We derive the hash directly from the pinned flake
                   # input — no git required at runtime.
                   if [ ! -f source/version ]; then
-                    echo "r0-${builtins.substring 0 7 (builtins.toString openwrt-source.rev)}" > source/version
+                    echo "r0-${builtins.substring 0 7 (toString openwrt-source.rev)}" > source/version
                   fi
 
                   # Setup dl directory for caching (create unconditionally so cache action can save it)
@@ -573,7 +603,7 @@
                             echo "✅ Applied $(basename $patch)"
                           else
                             echo "❌ Failed to apply $(basename $patch)"
-                            if [ $CI == 1 ]; then exit 1; fi
+                            if [ "$CI" = "1" ]; then exit 1; fi
                             echo "Continuing anyway so you can run cleanup scripts"
                           fi
                         fi
@@ -584,8 +614,7 @@
                     # This handles structure like patches/package/utils/util-linux/patches/100-...
                     if [ -d "$PATCH_DIR/package" ]; then
                       echo "Copying package patches..."
-                      # Use rsync to merge directories. COW handles writability automatically.
-                      rsync -a --no-perms "$PATCH_DIR/package/" source/package/
+                      rsync -a --no-perms --chmod=u+rwX "$PATCH_DIR/package/" source/package/
                     fi
                   fi
 
