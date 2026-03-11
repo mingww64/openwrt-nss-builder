@@ -1,0 +1,21 @@
+diff -urN a/feeds/packages/lang/python/python3/Makefile b/feeds/packages/lang/python/python3/Makefile
+--- a/feeds/packages/lang/python/python3/Makefile	2026-03-11 07:26:07.913190395 -0700
++++ b/feeds/packages/lang/python/python3/Makefile	2026-03-11 07:26:07.917851970 -0700
+@@ -181,7 +181,7 @@
+ 	PYTHONSTRICTEXTENSIONBUILD=1
+ 
+ CONFIGURE_ARGS += \
+-	--enable-optimizations \
++	 \
+ 	--enable-shared \
+ 	--disable-test-modules \
+ 	--with-build-python \
+@@ -307,7 +307,7 @@
+ 
+ HOST_CONFIGURE_ARGS += \
+ 	--with-readline=no \
+-	--enable-optimizations \
++	 \
+ 	--disable-test-modules \
+ 	--with-ensurepip=upgrade \
+ 	--with-ssl-default-suites=openssl \
