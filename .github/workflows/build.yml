@@ -288,6 +288,8 @@ jobs:
     needs: [check_upstream, build]
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
     - uses: actions/checkout@v6
       with:
