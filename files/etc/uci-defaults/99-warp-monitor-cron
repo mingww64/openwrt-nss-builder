@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# Add cron job for warp-monitor if it doesn't exist
+mkdir -p /etc/crontabs
+touch /etc/crontabs/root
+
+if ! grep -q "warp-monitor.sh" /etc/crontabs/root 2>/dev/null; then
+    echo "* * * * * /usr/bin/warp-monitor.sh" >> /etc/crontabs/root
+fi
+
+# Enable and restart cron
+/etc/init.d/cron enable
+/etc/init.d/cron restart
+
+exit 0

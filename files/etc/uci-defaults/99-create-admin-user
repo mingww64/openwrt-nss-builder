@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# Add admin user if not exists
+if ! grep -q "^admin:" /etc/passwd; then
+	echo "admin:x:0:0:root:/root:/bin/false" >> /etc/passwd
+fi
+
+# Set admin password to 'passwd'
+if ! grep -q "^admin:" /etc/shadow; then
+	echo "admin:\$5\$jB880lMLWCKIFaDU\$vqVa34xjCoQbsNMxo5BFD.nQHQ/phse5CSXvb0Zc0g2:20580:0:99999:7:::" >> /etc/shadow
+fi
+
+# Update rpcd to use admin for web login
+uci set rpcd.@login[0].username='admin'
+uci set rpcd.@login[0].password='\$p\$admin'
+uci commit rpcd
+
+exit 0

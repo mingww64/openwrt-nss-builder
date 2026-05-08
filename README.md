@@ -30,7 +30,8 @@ build-nss-image --profile mr7350
 - `--menuconfig`: Classic `make menuconfig` UI.
 - `--sync-packages`: Sync packages from a live router via SSH.
 
-## Lifecycle & Maintenance
+
+## Maintenance
 
 The environment uses `fuse-overlayfs` to create a writable view of pinned Nix inputs.
 
@@ -38,10 +39,7 @@ The environment uses `fuse-overlayfs` to create a writable view of pinned Nix in
 - **Clean Mounts**: `unmount-nss-mounts` (Tears down FUSE, keeps build artifacts).
 - **Full Wipe**: `clean-nss-mounts` (Wipes everything for a fresh start).
 
-## CI/CD Highlights
+## First Boot
 
-The included GitHub Actions pipeline provides:
-- 📡 **Automated Upstream Sync**: Rebuilds only when OpenWrt `main-nss` or feeds change.
-- ⚡ **Optimized Builds**: Shared ImageBuilder/SDK per subtarget to save time/storage.
-- 📦 **Releases**: Automatic firmware uploads (`.bin`, `.itb`) and ImageBuilder (`.tar.zst`).
-- 🐛 **Failure Analysis**: Automatic log uploads and interactive SSH debugging.
+- **Default LuCI Credentials:** `admin` / `passwd`
+- **Cloudflare WARP:** A free WARP account is automatically registered on the fly to provision a WireGuard interface. Policy-Based Routing (PBR) rules will dynamically toggle based on the tunnel's connectivity to ensure seamless fallback.

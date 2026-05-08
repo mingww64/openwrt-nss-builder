@@ -1,0 +1,74 @@
+#!/bin/sh
+
+# Ensure curl and jsonfilter are available
+if ! command -v curl >/dev/null || ! command -v jsonfilter >/dev/null; then
+    exit 1
+fi
+
+# Generate WireGuard keys
+PRIV_KEY=$(wg genkey)
+PUB_KEY=$(echo "$PRIV_KEY" | wg pubkey)
+
+# Register with Cloudflare API
+API_URL="https://api.cloudflareclient.com/v0a884/reg"
+DATE_TOS=$(date -u +%FT%T.000Z)
+DATA="{\"key\": \"${PUB_KEY}\", \"install_id\": \"\", \"fcm_token\": \"\", \"tos\": \"${DATE_TOS}\", \"model\": \"PC\", \"locale\": \"en_US\"}"
+
+RESPONSE=$(curl -s -X POST -H 'User-Agent: okhttp/3.12.1' -H 'Content-Type: application/json' --data "$DATA" "$API_URL")
+
+# Extract details using jsonfilter
+V4=$(echo "$RESPONSE" | jsonfilter -e '@.config.interface.addresses.v4')
+V6=$(echo "$RESPONSE" | jsonfilter -e '@.config.interface.addresses.v6')
+PEER_PUB=$(echo "$RESPONSE" | jsonfilter -e '@.config.peers[0].public_key')
+ENDPOINT=$(echo "$RESPONSE" | jsonfilter -e '@.config.peers[0].endpoint.host')
+
+# Fallback endpoint if extraction fails
+[ -z "$ENDPOINT" ] && ENDPOINT="engage.cloudflareclient.com:2408"
+[ -z "$PEER_PUB" ] && PEER_PUB="bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
+
+HOST=$(echo "$ENDPOINT" | cut -d: -f1)
+PORT=$(echo "$ENDPOINT" | cut -d: -f2)
+
+# Verify we got valid addresses before committing
+if [ -n "$V4" ] && [ -n "$V6" ]; then
+    # 1. Setup WARP Interface in /etc/config/network
+    uci set network.warp='interface'
+    uci set network.warp.proto='wireguard'
+    uci set network.warp.private_key="$PRIV_KEY"
+    uci add_list network.warp.addresses="${V4}/32"
+    uci add_list network.warp.addresses="${V6}/128"
+    uci set network.warp.multipath='off'
+
+    uci set network.warp_cloudflare='wireguard_warp'
+    uci set network.warp_cloudflare.public_key="$PEER_PUB"
+    uci set network.warp_cloudflare.endpoint_host="$HOST"
+    uci set network.warp_cloudflare.endpoint_port="$PORT"
+    uci add_list network.warp_cloudflare.allowed_ips='0.0.0.0/0'
+    uci add_list network.warp_cloudflare.allowed_ips='::/0'
+    uci set network.warp_cloudflare.persistent_keepalive='25'
+    uci commit network
+
+    # 2. Setup Firewall Zone and Forwarding in /etc/config/firewall
+    uci set firewall.warp_zone='zone'
+    uci set firewall.warp_zone.name='warp'
+    uci set firewall.warp_zone.input='REJECT'
+    uci set firewall.warp_zone.output='ACCEPT'
+    uci set firewall.warp_zone.forward='REJECT'
+    uci set firewall.warp_zone.masq='1'
+    uci set firewall.warp_zone.mtu_fix='1'
+    uci add_list firewall.warp_zone.network='warp'
+
+    uci set firewall.lan_warp='forwarding'
+    uci set firewall.lan_warp.src='lan'
+    uci set firewall.lan_warp.dest='warp'
+
+
+
+    uci commit firewall
+
+    # Reload services to apply
+    /etc/init.d/network reload
+    /etc/init.d/firewall reload
+fi
+
+exit 0
