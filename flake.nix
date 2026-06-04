@@ -712,6 +712,8 @@
                     NSS_DELETED_FILE="$(mktemp)"
 
                     git -C "$NSS_TMP_REPO" init -q
+                    git -C "$NSS_TMP_REPO" config user.name "github-actions[bot]"
+                    git -C "$NSS_TMP_REPO" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                     git -C "$NSS_TMP_REPO" remote add openwrt https://github.com/openwrt/openwrt.git
                     git -C "$NSS_TMP_REPO" remote add nss https://github.com/qosmio/openwrt-ipq.git
 
