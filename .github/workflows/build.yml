@@ -37,8 +37,10 @@ jobs:
     runs-on: ubuntu-slim
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
-      latest_hash: ${{ steps.check.outputs.latest_hash }}
+      combined_hash: ${{ steps.check.outputs.combined_hash }}
       short_hash: ${{ steps.check.outputs.short_hash }}
+      openwrt_hash: ${{ steps.check.outputs.openwrt_hash }}
+      nss_hash: ${{ steps.check.outputs.nss_hash }}
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v6
@@ -46,13 +48,18 @@ jobs:
       - name: Check Upstream
         id: check
         run: |
-          UPSTREAM_URL="https://github.com/qosmio/openwrt-ipq.git"
-          BRANCH="main-nss"
-          
-          # Get latest commit hash from upstream
-          LATEST_HASH=$(git ls-remote $UPSTREAM_URL refs/heads/$BRANCH | awk '{print $1}')
-          
-          echo "Latest upstream hash: $LATEST_HASH"
+          OPENWRT_URL="https://github.com/openwrt/openwrt.git"
+          OPENWRT_BRANCH="main"
+          NSS_URL="https://github.com/qosmio/openwrt-ipq.git"
+          NSS_BRANCH="main-nss"
+
+          OPENWRT_HASH=$(git ls-remote "$OPENWRT_URL" "refs/heads/$OPENWRT_BRANCH" | awk '{print $1}')
+          NSS_HASH=$(git ls-remote "$NSS_URL" "refs/heads/$NSS_BRANCH" | awk '{print $1}')
+          COMBINED_HASH=$(printf '%s:%s' "$OPENWRT_HASH" "$NSS_HASH" | sha256sum | awk '{print $1}')
+
+          echo "Latest official OpenWrt hash: $OPENWRT_HASH"
+          echo "Latest NSS hash: $NSS_HASH"
+          echo "Combined rebase hash: $COMBINED_HASH"
           
           # Read stored hash from variable (if exists) or file
           # We use a repository variable for persistence. 
@@ -62,11 +69,13 @@ jobs:
           
           echo "Last built hash: $LAST_BUILT_HASH"
           
-          if [ "$LATEST_HASH" != "$LAST_BUILT_HASH" ]; then
-            echo "New commit found ($LATEST_HASH). Triggering build."
+          if [ "$COMBINED_HASH" != "$LAST_BUILT_HASH" ]; then
+            echo "New upstream state found. Triggering build."
             echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "latest_hash=$LATEST_HASH" >> $GITHUB_OUTPUT
-            echo "short_hash=${LATEST_HASH:0:8}" >> $GITHUB_OUTPUT
+            echo "combined_hash=$COMBINED_HASH" >> $GITHUB_OUTPUT
+            echo "short_hash=${COMBINED_HASH:0:8}" >> $GITHUB_OUTPUT
+            echo "openwrt_hash=$OPENWRT_HASH" >> $GITHUB_OUTPUT
+            echo "nss_hash=$NSS_HASH" >> $GITHUB_OUTPUT
           else
             echo "Upstream matches last build ($LAST_BUILT_HASH). Skipping."
             echo "should_build=false" >> $GITHUB_OUTPUT
@@ -141,7 +150,9 @@ jobs:
           prerelease: true
           draft: true
           body: |
-            * **Upstream Commit:** https://github.com/qosmio/openwrt-ipq/commit/${{ needs.check_upstream.outputs.latest_hash || 'N/A' }}
+            * **OpenWrt Commit:** https://github.com/openwrt/openwrt/commit/${{ needs.check_upstream.outputs.openwrt_hash || 'N/A' }}
+            * **NSS Patch Commit:** https://github.com/qosmio/openwrt-ipq/commit/${{ needs.check_upstream.outputs.nss_hash || 'N/A' }}
+            * **Rebase State Hash:** `${{ needs.check_upstream.outputs.combined_hash || 'N/A' }}`
             * **Build Commit:** ${{ github.sha }}
             * **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
@@ -326,11 +337,11 @@ jobs:
         fi
 
     - name: Update Last Built Hash
-      if: needs.check_upstream.outputs.latest_hash != ''
+      if: needs.check_upstream.outputs.combined_hash != ''
       env:
         GH_TOKEN: ${{ secrets.WRITE_TO_VAR }}
       run: |
-        echo "Updating LAST_BUILT_HASH to ${{ needs.check_upstream.outputs.latest_hash }}"
+        echo "Updating LAST_BUILT_HASH to ${{ needs.check_upstream.outputs.combined_hash }}"
         gh variable set LAST_BUILT_HASH \
-          --body "${{ needs.check_upstream.outputs.latest_hash }}" \
+          --body "${{ needs.check_upstream.outputs.combined_hash }}" \
           --repo ${{ github.repository }}

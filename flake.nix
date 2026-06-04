@@ -4,6 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     openwrt-source = {
+      url = "github:openwrt/openwrt";
+      flake = false;
+    };
+    openwrt-source-nss = {
       url = "github:qosmio/openwrt-ipq/main-nss";
       flake = false;
     };
@@ -49,6 +53,7 @@
     self,
     nixpkgs,
     openwrt-source,
+    openwrt-source-nss,
     openwrt-packages,
     openwrt-luci,
     openwrt-routing,
@@ -547,7 +552,7 @@
                   # Automatically remount if flake inputs have changed.
                   # Only unmounts FUSE mounts — build artifacts in .source-upper are preserved.
                   # Run 'clean-nss-mounts' manually if you want a full clean rebuild.
-                  CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}-${luci-app-argon-config.narHash}-${luci-app-wechatpush.narHash}-${wrtbwmon.narHash}"
+                  CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-source-nss.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}-${luci-app-argon-config.narHash}-${luci-app-wechatpush.narHash}-${wrtbwmon.narHash}"
                   INPUTS_CHANGED=0
                   if [ -f .flake-inputs-hash ] && [ "$(cat .flake-inputs-hash)" != "$CURRENT_INPUTS_HASH" ]; then
                     echo "🔄 Flake inputs changed! Unmounting old mounts (build artifacts preserved)..."
@@ -687,6 +692,64 @@
                   if [ ! -L "$PWD/source/dl" ]; then
                     rm -rf "$PWD/source/dl"
                     ln -s "$PWD/dl" "$PWD/source/dl"
+                  fi
+
+                  # Rebase NSS tree over official OpenWrt by overlaying only changed files.
+                  # This keeps local build outputs intact while refreshing NSS deltas when either source changes.
+                  NSS_REBASE_HASH="${openwrt-source.narHash}-${openwrt-source-nss.narHash}"
+                  NSS_REBASE_STATE_FILE=".nss-rebase-hash"
+                  NSS_REBASE_TRACK_FILE=".nss-overlay-files"
+                  if [ ! -f "$NSS_REBASE_STATE_FILE" ] || [ "$(cat "$NSS_REBASE_STATE_FILE")" != "$NSS_REBASE_HASH" ]; then
+                    echo "--- Rebasing official OpenWrt with NSS delta ---"
+                    if [ -f "$NSS_REBASE_TRACK_FILE" ]; then
+                      while IFS= read -r path; do
+                        [ -n "$path" ] && rm -f "source/$path"
+                      done < "$NSS_REBASE_TRACK_FILE"
+                    fi
+
+                    NSS_DIFF_FILE="$(mktemp)"
+                    python3 - "${openwrt-source}" "${openwrt-source-nss}" "$NSS_DIFF_FILE" <<'PY'
+        import filecmp
+        import os
+        import sys
+
+        base, nss, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
+        diffs = []
+
+        for root, dirs, files in os.walk(nss):
+          dirs[:] = [d for d in dirs if d != ".git"]
+          rel_root = os.path.relpath(root, nss)
+          rel_root = "" if rel_root == "." else rel_root
+          for name in files:
+            rel = os.path.join(rel_root, name) if rel_root else name
+            nss_path = os.path.join(nss, rel)
+            base_path = os.path.join(base, rel)
+            if not os.path.exists(base_path):
+              diffs.append(rel)
+              continue
+            if os.path.islink(nss_path) or os.path.islink(base_path):
+              if not (os.path.islink(nss_path) and os.path.islink(base_path) and os.readlink(nss_path) == os.readlink(base_path)):
+                diffs.append(rel)
+              continue
+            if os.path.isdir(base_path):
+              diffs.append(rel)
+              continue
+            if not filecmp.cmp(nss_path, base_path, shallow=False):
+              diffs.append(rel)
+
+        diffs.sort()
+        with open(out_path, "w", encoding="utf-8") as fh:
+          for rel in diffs:
+            fh.write(rel + "\n")
+        PY
+
+                    if [ -s "$NSS_DIFF_FILE" ]; then
+                      rsync -a --files-from="$NSS_DIFF_FILE" "${openwrt-source-nss}/" source/
+                    fi
+
+                    cp "$NSS_DIFF_FILE" "$NSS_REBASE_TRACK_FILE"
+                    echo "$NSS_REBASE_HASH" > "$NSS_REBASE_STATE_FILE"
+                    rm -f "$NSS_DIFF_FILE"
                   fi
 
                   # Setup ccache directory for caching (create unconditionally so cache action can save it)
