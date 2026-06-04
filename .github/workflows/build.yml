@@ -255,6 +255,14 @@ jobs:
         path: source/bin/
         if-no-files-found: warn
 
+    - name: Namespace kernel debug archive
+      if: success()
+      run: |
+        find source/bin/targets -type f -name "kernel-debug.tar.zst" -print0 | while IFS= read -r -d '' file; do
+          dir="$(dirname "$file")"
+          mv "$file" "$dir/kernel-debug-${{ matrix.device.profile }}.tar.zst"
+        done
+
     - name: Upload to Release
       uses: softprops/action-gh-release@v2.4.2
       if: success()
