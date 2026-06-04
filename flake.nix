@@ -4,6 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     openwrt-source = {
+      url = "github:openwrt/openwrt";
+      flake = false;
+    };
+    openwrt-source-nss = {
       url = "github:qosmio/openwrt-ipq/main-nss";
       flake = false;
     };
@@ -49,6 +53,7 @@
     self,
     nixpkgs,
     openwrt-source,
+    openwrt-source-nss,
     openwrt-packages,
     openwrt-luci,
     openwrt-routing,
@@ -547,7 +552,7 @@
                   # Automatically remount if flake inputs have changed.
                   # Only unmounts FUSE mounts — build artifacts in .source-upper are preserved.
                   # Run 'clean-nss-mounts' manually if you want a full clean rebuild.
-                  CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}-${luci-app-argon-config.narHash}-${luci-app-wechatpush.narHash}-${wrtbwmon.narHash}"
+                  CURRENT_INPUTS_HASH="${openwrt-source.narHash}-${openwrt-source-nss.narHash}-${openwrt-packages.narHash}-${openwrt-luci.narHash}-${openwrt-routing.narHash}-${nss-packages.narHash}-${sqm-scripts-nss.narHash}-${luci-theme-argon.narHash}-${luci-app-argon-config.narHash}-${luci-app-wechatpush.narHash}-${wrtbwmon.narHash}"
                   INPUTS_CHANGED=0
                   if [ -f .flake-inputs-hash ] && [ "$(cat .flake-inputs-hash)" != "$CURRENT_INPUTS_HASH" ]; then
                     echo "🔄 Flake inputs changed! Unmounting old mounts (build artifacts preserved)..."
@@ -687,6 +692,82 @@
                   if [ ! -L "$PWD/source/dl" ]; then
                     rm -rf "$PWD/source/dl"
                     ln -s "$PWD/dl" "$PWD/source/dl"
+                  fi
+
+                  # Rebase NSS commits onto official OpenWrt and apply only resulting deltas.
+                  # This fails fast on conflicts so official upstream changes are never silently shadowed.
+                  NSS_REBASE_HASH="${openwrt-source.narHash}-${openwrt-source-nss.narHash}"
+                  NSS_REBASE_STATE_FILE=".nss-rebase-hash"
+                  NSS_REBASE_TRACK_FILE=".nss-overlay-files"
+                  if [ ! -f "$NSS_REBASE_STATE_FILE" ] || [ "$(cat "$NSS_REBASE_STATE_FILE")" != "$NSS_REBASE_HASH" ]; then
+                    echo "--- Rebasing NSS commits onto official OpenWrt ---"
+                    if [ -f "$NSS_REBASE_TRACK_FILE" ]; then
+                      while IFS= read -r path; do
+                        [ -n "$path" ] && rm -rf "source/$path"
+                      done < "$NSS_REBASE_TRACK_FILE"
+                    fi
+
+                    NSS_TMP_REPO="$(mktemp -d)"
+                    NSS_CHANGED_FILE="$(mktemp)"
+                    NSS_DELETED_FILE="$(mktemp)"
+
+                    git -C "$NSS_TMP_REPO" init -q
+                    git -C "$NSS_TMP_REPO" remote add openwrt https://github.com/openwrt/openwrt.git
+                    git -C "$NSS_TMP_REPO" remote add nss https://github.com/qosmio/openwrt-ipq.git
+
+                    if ! git -C "$NSS_TMP_REPO" fetch --no-tags openwrt +refs/heads/main:refs/remotes/openwrt/main ||
+                       ! git -C "$NSS_TMP_REPO" fetch --no-tags nss +refs/heads/main-nss:refs/remotes/nss/main-nss; then
+                      echo "❌ Failed to fetch upstream repositories for NSS rebase."
+                      rm -rf "$NSS_TMP_REPO"
+                      rm -f "$NSS_CHANGED_FILE" "$NSS_DELETED_FILE"
+                      exit 1
+                    fi
+
+                    if ! git -C "$NSS_TMP_REPO" cat-file -e "${openwrt-source.rev}^{commit}" ||
+                       ! git -C "$NSS_TMP_REPO" cat-file -e "${openwrt-source-nss.rev}^{commit}"; then
+                      echo "❌ Pinned revisions are not present in fetched history."
+                      rm -rf "$NSS_TMP_REPO"
+                      rm -f "$NSS_CHANGED_FILE" "$NSS_DELETED_FILE"
+                      exit 1
+                    fi
+
+                    git -C "$NSS_TMP_REPO" update-ref refs/remotes/openwrt/pinned "${openwrt-source.rev}"
+                    git -C "$NSS_TMP_REPO" update-ref refs/remotes/nss/pinned "${openwrt-source-nss.rev}"
+
+                    MERGE_BASE="$(git -C "$NSS_TMP_REPO" merge-base refs/remotes/openwrt/pinned refs/remotes/nss/pinned || true)"
+                    if [ -z "$MERGE_BASE" ]; then
+                      echo "❌ Failed to find merge-base between official OpenWrt and NSS source."
+                      rm -rf "$NSS_TMP_REPO"
+                      rm -f "$NSS_CHANGED_FILE" "$NSS_DELETED_FILE"
+                      exit 1
+                    fi
+
+                    git -C "$NSS_TMP_REPO" checkout -q -B nss-rebased refs/remotes/nss/pinned
+                    if ! git -C "$NSS_TMP_REPO" rebase --onto refs/remotes/openwrt/pinned "$MERGE_BASE"; then
+                      echo "❌ NSS rebase conflict detected. Resolve upstream before building."
+                      git -C "$NSS_TMP_REPO" rebase --abort || true
+                      rm -rf "$NSS_TMP_REPO"
+                      rm -f "$NSS_CHANGED_FILE" "$NSS_DELETED_FILE"
+                      exit 1
+                    fi
+
+                    git -C "$NSS_TMP_REPO" diff --name-only --diff-filter=ACMRT refs/remotes/openwrt/pinned..HEAD > "$NSS_CHANGED_FILE"
+                    git -C "$NSS_TMP_REPO" diff --name-only --diff-filter=D refs/remotes/openwrt/pinned..HEAD > "$NSS_DELETED_FILE"
+
+                    if [ -s "$NSS_CHANGED_FILE" ]; then
+                      rsync -a --files-from="$NSS_CHANGED_FILE" "$NSS_TMP_REPO/" source/
+                    fi
+
+                    if [ -s "$NSS_DELETED_FILE" ]; then
+                      while IFS= read -r path; do
+                        [ -n "$path" ] && rm -rf "source/$path"
+                      done < "$NSS_DELETED_FILE"
+                    fi
+
+                    cat "$NSS_CHANGED_FILE" "$NSS_DELETED_FILE" | sed '/^$/d' | sort -u > "$NSS_REBASE_TRACK_FILE"
+                    echo "$NSS_REBASE_HASH" > "$NSS_REBASE_STATE_FILE"
+                    rm -rf "$NSS_TMP_REPO"
+                    rm -f "$NSS_CHANGED_FILE" "$NSS_DELETED_FILE"
                   fi
 
                   # Setup ccache directory for caching (create unconditionally so cache action can save it)
