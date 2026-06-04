@@ -55,6 +55,7 @@ if [ -n "$V4" ] && [ -n "$V6" ]; then
     uci set firewall.warp_zone.output='ACCEPT'
     uci set firewall.warp_zone.forward='REJECT'
     uci set firewall.warp_zone.masq='1'
+    uci set firewall.warp_zone.masq6='1'
     uci set firewall.warp_zone.mtu_fix='1'
     uci add_list firewall.warp_zone.network='warp'
 
