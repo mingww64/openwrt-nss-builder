@@ -132,11 +132,11 @@
     "openwrt-source": {
       "flake": false,
       "locked": {
-        "lastModified": 1780671005,
-        "narHash": "sha256-yVEvCxD2S6bDyNbEVXnEAMMxGkOby+phFTo42sPS7TI=",
+        "lastModified": 1780689101,
+        "narHash": "sha256-Ag5JQYWdqn8aBiODrZKSQwo8tfcVq396mURDoefjVLg=",
         "owner": "openwrt",
         "repo": "openwrt",
-        "rev": "848c54b5f42904d4afaae077efd5180cb6752b9c",
+        "rev": "b115da38b3dd9711f4b71391472acb972b949d77",
         "type": "github"
       },
       "original": {
