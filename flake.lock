@@ -100,11 +100,11 @@
     "openwrt-packages": {
       "flake": false,
       "locked": {
-        "lastModified": 1780897520,
-        "narHash": "sha256-AH91K9VSAVp853oJc9jDhEjpBiLnkR5DuSoePL3y/HE=",
+        "lastModified": 1780929705,
+        "narHash": "sha256-PHN/PYZMyQvb0RYNO9IYhVUUBEKq0Vrkwmhk9OqoNgM=",
         "owner": "openwrt",
         "repo": "packages",
-        "rev": "335244d32c7d7b37cd67f244bf486cccf4593a2d",
+        "rev": "b6d2070fc82996d78ada8a6638639a285c0edcfb",
         "type": "github"
       },
       "original": {
@@ -132,11 +132,11 @@
     "openwrt-source": {
       "flake": false,
       "locked": {
-        "lastModified": 1780905559,
-        "narHash": "sha256-sm95IzkKQBCRy+UHBwNBiAUswZ6qapHSRH3RW6I9hAk=",
+        "lastModified": 1780928303,
+        "narHash": "sha256-+gQZqn53J09GmUfmp/VSVBr0uZs5PjaiCXXBZvtbJgM=",
         "owner": "openwrt",
         "repo": "openwrt",
-        "rev": "33ed49c948b0a2cb90ef50ffe7afdcff8bb42c07",
+        "rev": "a5107ad58c6162a70a56ada1822c3c3e6ba09a12",
         "type": "github"
       },
       "original": {
