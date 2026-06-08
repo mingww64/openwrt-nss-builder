@@ -50,11 +50,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1780243769,
-        "narHash": "sha256-x5UQuRsH3MqI0U9afaXSNqzTPSeZlRLvFAav2Ux1pNw=",
+        "lastModified": 1780749050,
+        "narHash": "sha256-3av0pIjlOWQ6rDbNOmpUSvbNnJkGORQKKjb4LtCZsIY=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "331800de5053fcebacf6813adb5db9c9dca22a0c",
+        "rev": "a799d3e3886da994fa307f817a6bc705ae538eeb",
         "type": "github"
       },
       "original": {
@@ -100,11 +100,11 @@
     "openwrt-packages": {
       "flake": false,
       "locked": {
-        "lastModified": 1780856469,
-        "narHash": "sha256-mCthgJ7EPwl5YmiCbsVKDblJ32dQzdygiirflOciPgA=",
+        "lastModified": 1780874261,
+        "narHash": "sha256-JsP6J1K38xRusVrhfPJxtfAbDnKZ/M/IKmg+Xe94Nno=",
         "owner": "openwrt",
         "repo": "packages",
-        "rev": "14d197418d266f9ba8268f54159907bf641876e7",
+        "rev": "d08ac509fa1471bdb65b09a0db8667a6bd0220f5",
         "type": "github"
       },
       "original": {
@@ -132,11 +132,11 @@
     "openwrt-source": {
       "flake": false,
       "locked": {
-        "lastModified": 1780851823,
-        "narHash": "sha256-r/ir7piWTFs8JJMs3EpV84zjJ4aeQQgfOVDRTY7M+zE=",
+        "lastModified": 1780866184,
+        "narHash": "sha256-9BXeeTg5+QUtkZfTTG0oxNnS45wK2FoeBvp1/bYyf50=",
         "owner": "openwrt",
         "repo": "openwrt",
-        "rev": "9b3f3a71746113bee44c6ad6a0bdab53809bee13",
+        "rev": "e2358514955051d26224205c5f7221fa749b783a",
         "type": "github"
       },
       "original": {
