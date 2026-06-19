@@ -1,11 +1,20 @@
 --- a/feeds/luci/modules/luci-base/ucode/dispatcher.uc
 +++ b/feeds/luci/modules/luci-base/ucode/dispatcher.uc
-@@ -945,7 +945,7 @@
- 					http.status(403, 'Forbidden');
- 					http.header('X-LuCI-Login-Required', 'yes');
+@@ -968,7 +968,7 @@
  
--					let scope = { duser: 'root', fuser: user };
-+					let scope = { duser: 'admin', fuser: user };
- 					let theme_sysauth = `themes/${basename(runtime.env.media)}/sysauth`;
+ 					// Show login form with 2FA fields if required
+ 					let scope = {
+-						duser: 'root',
++						duser: 'admin',
+ 						fuser: user,
+ 						auth_fields: auth_fields,
+ 						auth_message: auth_message,
+@@ -1013,7 +1013,7 @@
+ 						http.header('X-LuCI-Login-Required', 'yes');
  
- 					if (runtime.is_ucode_template(theme_sysauth) || runtime.is_lua_template(theme_sysauth)) {
+ 						let scope = {
+-							duser: 'root',
++							duser: 'admin',
+ 							fuser: user,
+ 							auth_plugin: length(auth_check.challenges) ? auth_check.challenges[0].name : null,
+ 							auth_fields: auth_check.fields,
