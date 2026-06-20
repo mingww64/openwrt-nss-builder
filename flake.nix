@@ -835,6 +835,12 @@
                       echo "Copying package patches..."
                       rsync -a --no-perms "$PATCH_DIR/package/" source/package/
                     fi
+
+                    # For target patches (e.g. qualcommax kernel patches), copy them to destination
+                    if [ -d "$PATCH_DIR/target" ]; then
+                      echo "Copying target patches..."
+                      rsync -a --no-perms "$PATCH_DIR/target/" source/target/
+                    fi
                   fi
 
                   # Sync custom rootfs files overlay into OpenWrt source
