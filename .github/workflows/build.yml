@@ -66,8 +66,20 @@ jobs:
           # Note: This requires the workflow to have read access to variables.
           # If variable is empty, we default to building.
           LAST_BUILT_HASH="${{ vars.LAST_BUILT_HASH }}"
+          LAST_RUN_FAILED="${{ vars.LAST_RUN_FAILED }}"
+          LAST_ATTEMPT_NSS_HASH="${{ vars.LAST_ATTEMPT_NSS_HASH }}"
           
           echo "Last built hash: $LAST_BUILT_HASH"
+          echo "Last run failed: $LAST_RUN_FAILED"
+          echo "Last attempted NSS hash: $LAST_ATTEMPT_NSS_HASH"
+
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] && \
+             [ "$LAST_RUN_FAILED" = "true" ] && \
+             [ "$NSS_HASH" = "$LAST_ATTEMPT_NSS_HASH" ]; then
+            echo "Last run failed and qosmio/openwrt-ipq has not changed. Skipping build."
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
           
           if [ "$COMBINED_HASH" != "$LAST_BUILT_HASH" ]; then
             echo "New upstream state found. Triggering build."
@@ -345,3 +357,30 @@ jobs:
         gh variable set LAST_BUILT_HASH \
           --body "${{ needs.check_upstream.outputs.combined_hash }}" \
           --repo ${{ github.repository }}
+  update_last_run_state:
+    needs: [check_upstream, build]
+    if: always() && needs.check_upstream.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Update last run failure state
+        env:
+          GH_TOKEN: ${{ secrets.WRITE_TO_VAR }}
+        run: |
+          LAST_RUN_FAILED="false"
+          if [ "${{ needs.build.result }}" = "failure" ]; then
+            LAST_RUN_FAILED="true"
+          fi
+
+          echo "Updating LAST_RUN_FAILED to $LAST_RUN_FAILED"
+          gh variable set LAST_RUN_FAILED \
+            --body "$LAST_RUN_FAILED" \
+            --repo ${{ github.repository }}
+
+          if [ -n "${{ needs.check_upstream.outputs.nss_hash }}" ]; then
+            echo "Updating LAST_ATTEMPT_NSS_HASH to ${{ needs.check_upstream.outputs.nss_hash }}"
+            gh variable set LAST_ATTEMPT_NSS_HASH \
+              --body "${{ needs.check_upstream.outputs.nss_hash }}" \
+              --repo ${{ github.repository }}
+          fi
